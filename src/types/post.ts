@@ -12,17 +12,17 @@ export type Media = {
 };
 
 export type Comment = {
-    userReaction: ReactionAction;
-    likeCount: number;
-    dislikeCount: number;
-    laughCount: number;
-    repostCount: number;
-    commentCount: number;
-    id: string;
-    author: Author;
-    content: string;
-    createdAt: string;
-    replies?: Comment[];
+  userReaction: ReactionAction;
+  likeCount: number;
+  dislikeCount: number;
+  laughCount: number;
+  repostCount: number;
+  commentCount: number;
+  id: string;
+  author: Author;
+  content: string;
+  createdAt: string;
+  replies?: Comment[];
 };
 
 export type Post = {
@@ -37,10 +37,12 @@ export type Post = {
   commentCount: number;
   userReaction: ReactionAction;
   repostedBy?: Author;
+  isReposted?: boolean;
   quotedPost?: Post;
   poll?: Poll;
   comments?: Comment[];
   media?: Media[];
+  parentPostId?: string;
 };
 
 export type ReportReason = 'SPAM' | 'HARASSMENT' | 'HATE_SPEECH' | 'MISINFORMATION' | 'OTHER';

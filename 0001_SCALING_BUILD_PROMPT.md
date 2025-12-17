@@ -97,7 +97,7 @@ Visible to **Everyone**:
 ### When Viewing **Own Profile**
 
 * “Edit profile”
-* Settings shortcut (optional)
+* Settings shortcut
 * No follow button (ever)
 
 ### When Viewing **Another User**
@@ -130,9 +130,8 @@ Tabs are **filters over the same post corpus**.
    * Replies included
    * Reposts excluded
 
-2. **Posts & Replies**
+2. **Replies**
 
-   * Original posts
    * Replies
    * Quote posts
 
@@ -141,15 +140,16 @@ Tabs are **filters over the same post corpus**.
    * Posts containing media
    * Order preserved
 
-4. **Likes**
+4. **Dis/Likes**
 
    * Posts liked by user
+   * Posts disliked by user
    * Public by default (pre-2023)
 
 ⚠️ **Invariant**
 
 * Deleting a post removes it from *all* tabs
-* Likes tab is a projection of reaction edges, not a feed
+* Dis/Likes tab is a projection of reaction edges, not a feed
 
 ---
 

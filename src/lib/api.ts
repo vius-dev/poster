@@ -1,52 +1,162 @@
-
-// This file will abstract all Supabase calls.
-// It will be extended with function stubs for now.
 import { Post, ReactionAction, Comment } from "@/types/post";
 import { PollChoice } from "@/types/poll";
 import { User, UserProfile } from "@/types/user";
 import { Report, ReportableEntityType, ReportType } from "@/types/reports";
 import { createReport as createReportApi } from './reportsApi';
+import { FeedEngine } from './feed/FeedEngine';
+import { ViewerRelationship } from "@/components/profile/ProfileActionRow";
+import { Notification } from "@/types/notification";
+import { Conversation, Message } from "@/types/message";
 
 // --- Data Structures for Moderation ---
-type PendingReaction = {
-  postId: string;
-  action: ReactionAction;
+const mutedUsers = new Set<string>();
+const blockedUsersIDs = new Set<string>();
+const followingIDs = new Set<string>();
+const allNotifications: Notification[] = [];
+const hashtagUsage = new Map<string, number>();
+
+// Helpers for Phase-6 Discovery
+const parseMentions = (content: string): string[] => {
+  const matches = content.match(/@(\w+)/g);
+  return matches ? matches.map(m => m.substring(1).toLowerCase()) : [];
 };
 
-const mutedUsers = new Set<string>();
-const blockedUsers = new Set<string>();
+const parseHashtags = (content: string): string[] => {
+  const matches = content.match(/#(\w+)/g);
+  return matches ? matches.map(m => m.substring(1).toLowerCase()) : [];
+};
+
+const createNotification = (notification: Omit<Notification, 'id' | 'createdAt' | 'isRead'>) => {
+  const newNotif: Notification = {
+    ...notification,
+    id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    createdAt: new Date().toISOString(),
+    isRead: false,
+  };
+  allNotifications.unshift(newNotif);
+};
 
 // --- Mock User Data ---
 const allUsers: User[] = [
-  { id: '0', name: 'Current User', username: 'currentuser', avatar: 'https://i.pravatar.cc/150?u=a042581f4e29026704d', headerImage: 'https://picsum.photos/seed/picsum/600/200', bio: 'Just a regular user navigating the digital world. I love coding and coffee.', location: 'San Francisco, CA', website: 'https://example.com', is_active: true, is_limited: false, is_shadow_banned: false, is_suspended: false },
-  { id: '1', name: 'John Doe', username: 'johndoe', avatar: 'https://i.pravatar.cc/150?u=a042581f4e29026704d', headerImage: 'https://picsum.photos/seed/johndoe/600/200', bio: 'Exploring the intersection of technology and art. #tech #art', location: 'New York, NY', website: 'https://johndoe.com', is_active: true, is_limited: false, is_shadow_banned: false, is_suspended: false },
-  { id: '2', name: 'Jane Smith', username: 'janesmith', avatar: 'https://i.pravatar.cc/150?u=a042581f4e29026704e', headerImage: 'https://picsum.photos/seed/janesmith/600/200', bio: 'Foodie, traveler, and bookworm. Always looking for the next adventure.', location: 'London, UK', website: 'https://janesmithadventures.com', is_active: true, is_limited: false, is_shadow_banned: false, is_suspended: false },
-  { id: '3', name: 'Alice', username: 'alice', avatar: 'https://i.pravatar.cc/150?u=a042581f4e29026704f', headerImage: 'https://picsum.photos/seed/alice/600/200', bio: 'Lover of open source and cats. Building cool things with code.', location: 'Berlin, Germany', website: 'https://github.com/alice', is_active: true, is_limited: false, is_shadow_banned: false, is_suspended: false },
-  { id: '4', name: 'Bob', username: 'bob', avatar: 'https://i.pravatar.cc/150?u=a042581f4e29026704a', headerImage: 'https://picsum.photos/seed/bob/600/200', bio: 'Designer and front-end developer. Making the web beautiful.', location: 'Paris, France', website: 'https://bob.design', is_active: true, is_limited: false, is_shadow_banned: true, is_suspended: false }, // Shadow-banned user
-  { id: '5', name: 'Charlie', username: 'charlie', avatar: 'https://i.pravatar.cc/150?u=a042581f4e29026704b', headerImage: 'https://picsum.photos/seed/charlie/600/200', bio: 'Just here for the memes.', location: 'Internet', website: '', is_active: true, is_limited: false, is_shadow_banned: false, is_suspended: false },
-  { id: '6', name: 'David', username: 'david', avatar: 'https://i.pravatar.cc/150?u=a042581f4e29026704c', headerImage: 'https://picsum.photos/seed/david/600/200', bio: 'This account is suspended.', location: 'Nowhere', website: '', is_active: false, is_limited: false, is_shadow_banned: false, is_suspended: true }, // Suspended user
-  { id: '9', name: 'Emily', username: 'emily', avatar: 'https://i.pravatar.cc/150?u=a042581f4e29026704g', headerImage: 'https://picsum.photos/seed/emily/600/200', bio: 'Musician and songwriter. Trying to change the world one song at a time.', location: 'Nashville, TN', website: 'https://emilysongs.com', is_active: true, is_limited: false, is_shadow_banned: false, is_suspended: false },
-  { id: '10', name: 'Grace', username: 'grace', avatar: 'https://i.pravatar.cc/150?u=a042581f4e29026704i', headerImage: 'https://picsum.photos/seed/grace/600/200', bio: 'Scientist and researcher. Passionate about climate change and sustainability.', location: 'Zurich, Switzerland', website: '', is_active: true, is_limited: false, is_shadow_banned: false, is_suspended: false },
-  { id: '11', name: 'Heidi', username: 'heidi', avatar: 'https://i.pravatar.cc/150?u=a042581f4e29026704j', headerImage: 'https://picsum.photos/seed/heidi/600/200', bio: 'Athlete and fitness enthusiast. Pushing my limits every day.', location: 'Los Angeles, CA', website: 'https://heidifit.com', is_active: true, is_limited: false, is_shadow_banned: false, is_suspended: false },
-  { id: '12', name: 'Frank', username: 'frank', avatar: 'https://i.pravatar.cc/150?u=a042581f4e29026704h', headerImage: 'https://picsum.photos/seed/frank/600/200', bio: 'Photographer capturing moments in time.', location: 'Tokyo, Japan', website: 'https://frankphoto.com', is_active: true, is_limited: false, is_shadow_banned: false, is_suspended: false },
+  {
+    id: '0', name: 'Current User', username: 'currentuser', avatar: 'https://i.pravatar.cc/150?u=a042581f4e29026704d', headerImage: 'https://picsum.photos/seed/picsum/600/200', bio: 'Just a regular user navigating the digital world.', location: 'San Francisco, CA', website: 'https://example.com', is_active: true, is_limited: false, is_shadow_banned: false, is_suspended: false, is_muted: false
+  },
+  {
+    id: '1', name: 'John Doe', username: 'johndoe', avatar: 'https://i.pravatar.cc/150?u=a042581f4e29026704d', headerImage: 'https://picsum.photos/seed/johndoe/600/200', bio: 'Exploring technology and art.', location: 'New York, NY', website: 'https://johndoe.com', is_active: true, is_limited: false, is_shadow_banned: false, is_suspended: false, is_muted: false
+  },
+  {
+    id: '2', name: 'Jane Smith', username: 'janesmith', avatar: 'https://i.pravatar.cc/150?u=a042581f4e29026704e', headerImage: 'https://picsum.photos/seed/janesmith/600/200', bio: 'Foodie and traveler.', location: 'London, UK', website: 'https://janesmithadventures.com', is_active: true, is_limited: false, is_shadow_banned: false, is_suspended: false, is_muted: false
+  },
+  {
+    id: '3', name: 'Alice', username: 'alice', avatar: 'https://i.pravatar.cc/150?u=a042581f4e29026704f', headerImage: 'https://picsum.photos/seed/alice/600/200', bio: 'Open source lover.', location: 'Berlin, Germany', website: '', is_active: true, is_limited: false, is_shadow_banned: false, is_suspended: false, is_muted: false
+  },
+  {
+    id: '4', name: 'Bob', username: 'bob', avatar: 'https://i.pravatar.cc/150?u=a042581f4e29026704a', headerImage: 'https://picsum.photos/seed/bob/600/200', bio: 'Designer.', location: 'Paris, France', website: '', is_active: true, is_limited: false, is_shadow_banned: true, is_suspended: false, is_muted: false
+  },
+  {
+    id: '5', name: 'Charlie', username: 'charlie', avatar: 'https://i.pravatar.cc/150?u=a042581f4e29026704b', headerImage: 'https://picsum.photos/seed/charlie/600/200', bio: 'Just memes.', location: 'Internet', website: '', is_active: true, is_limited: false, is_shadow_banned: false, is_suspended: false, is_muted: false
+  },
+  {
+    id: '6', name: 'David', username: 'david', avatar: 'https://i.pravatar.cc/150?u=a042581f4e29026704c', headerImage: 'https://picsum.photos/seed/david/600/200', bio: 'Suspended.', location: 'Nowhere', website: '', is_active: false, is_limited: false, is_shadow_banned: false, is_suspended: true, is_muted: false
+  },
 ];
 
 const userMap = new Map(allUsers.map(user => [user.id, user]));
 
 const allPosts: Post[] = [
-  { id: '7', repostedBy: userMap.get('9')!, author: userMap.get('1')!, content: 'This is the first post! So excited to be here. #newbeginnings', createdAt: new Date(Date.now() - 1000 * 60 * 60 * 1).toISOString(), likeCount: 10, dislikeCount: 1, laughCount: 0, repostCount: 5, commentCount: 2, userReaction: 'NONE', comments: [ { id: 'c1', author: userMap.get('10')!, content: 'Welcome! Great to have you here.', createdAt: new Date(Date.now() - 1000 * 60 * 55).toISOString(), likeCount: 0, dislikeCount: 0, laughCount: 0, repostCount: 0, commentCount: 1, userReaction: 'NONE', replies: [ { id: 'r1', author: userMap.get('1')!, content: 'Thanks, Grace!', createdAt: new Date(Date.now() - 1000 * 60 * 50).toISOString(), likeCount: 0, dislikeCount: 0, laughCount: 0, repostCount: 0, commentCount: 0, userReaction: 'NONE' }, ], }, { id: 'c2', author: userMap.get('11')!, content: 'Looking forward to your posts!', createdAt: new Date(Date.now() - 1000 * 60 * 45).toISOString(), likeCount: 0, dislikeCount: 0, laughCount: 0, repostCount: 0, commentCount: 0, userReaction: 'NONE', replies: [], }, ], },
-  { id: '8', author: userMap.get('12')!, content: 'This is a great point. I would also add...', quotedPost: { id: '1', author: userMap.get('1')!, content: 'This is the first post! So excited to be here. #newbeginnings', createdAt: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(), likeCount: 10, dislikeCount: 1, laughCount: 0, repostCount: 5, commentCount: 2, userReaction: 'NONE', }, createdAt: new Date(Date.now() - 1000 * 60 * 3).toISOString(), likeCount: 15, dislikeCount: 0, laughCount: 0, repostCount: 3, commentCount: 4, userReaction: 'LIKE', },
-  { id: '1', author: userMap.get('1')!, content: 'This is the first post! So excited to be here. #newbeginnings', createdAt: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(), likeCount: 10, dislikeCount: 1, laughCount: 0, repostCount: 5, commentCount: 2, userReaction: 'NONE', },
-  { id: '2', author: userMap.get('2')!, content: 'Hello world! This is a great day. Just enjoying the weather.', createdAt: new Date(Date.now() - 1000 * 60 * 5).toISOString(), likeCount: 25, dislikeCount: 0, laughCount: 0, repostCount: 12, commentCount: 8, userReaction: 'LIKE', },
-  { id: '3', author: userMap.get('3')!, content: 'Just had the best coffee ever. Highly recommend the new cafe downtown.', createdAt: new Date(Date.now() - 1000 * 60 * 60 * 5).toISOString(), likeCount: 50, dislikeCount: 2, laughCount: 0, repostCount: 20, commentCount: 15, userReaction: 'NONE', },
-  { id: '4', author: userMap.get('4')!, content: 'Working on a new project. It is going to be amazing! #coding #developer', createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(), likeCount: 150, dislikeCount: 5, laughCount: 0, repostCount: 75, commentCount: 30, userReaction: 'DISLIKE', },
-  { id: '5', author: userMap.get('5')!, content: 'Is anyone else watching the new season of that show? No spoilers!', createdAt: new Date(Date.now() - 1000 * 60 * 60 * 48).toISOString(), likeCount: 80, dislikeCount: 3, laughCount: 0, repostCount: 10, commentCount: 25, userReaction: 'NONE', },
-  { id: '6', author: userMap.get('6')!, content: 'Just finished a marathon. Feeling tired but accomplished. #running', createdAt: new Date(Date.now() - 1000 * 60 * 60 * 72).toISOString(), likeCount: 200, dislikeCount: 10, laughCount: 0, repostCount: 50, commentCount: 40, userReaction: 'LIKE', },
+  { id: '101', author: userMap.get('1')!, content: 'Fresh post 1', createdAt: new Date(Date.now() - 1000 * 60 * 1).toISOString(), likeCount: 0, dislikeCount: 0, laughCount: 0, repostCount: 0, commentCount: 0, userReaction: 'NONE' },
+  { id: '102', author: userMap.get('2')!, content: 'Fresh post 2', createdAt: new Date(Date.now() - 1000 * 60 * 2).toISOString(), likeCount: 0, dislikeCount: 0, laughCount: 0, repostCount: 0, commentCount: 0, userReaction: 'NONE' },
+  { id: '103', author: userMap.get('3')!, content: 'Fresh post 3', createdAt: new Date(Date.now() - 1000 * 60 * 3).toISOString(), likeCount: 0, dislikeCount: 0, laughCount: 0, repostCount: 0, commentCount: 0, userReaction: 'NONE' },
+  { id: '104', author: userMap.get('1')!, content: 'Fresh post 4', createdAt: new Date(Date.now() - 1000 * 60 * 4).toISOString(), likeCount: 0, dislikeCount: 0, laughCount: 0, repostCount: 0, commentCount: 0, userReaction: 'NONE' },
+  { id: '105', author: userMap.get('2')!, content: 'Fresh post 5', createdAt: new Date(Date.now() - 1000 * 60 * 5).toISOString(), likeCount: 0, dislikeCount: 0, laughCount: 0, repostCount: 0, commentCount: 0, userReaction: 'NONE' },
+  { id: '106', author: userMap.get('3')!, content: 'Fresh post 6', createdAt: new Date(Date.now() - 1000 * 60 * 6).toISOString(), likeCount: 0, dislikeCount: 0, laughCount: 0, repostCount: 0, commentCount: 0, userReaction: 'NONE' },
+  { id: '107', author: userMap.get('1')!, content: 'Fresh post 7', createdAt: new Date(Date.now() - 1000 * 60 * 7).toISOString(), likeCount: 0, dislikeCount: 0, laughCount: 0, repostCount: 0, commentCount: 0, userReaction: 'NONE' },
+  { id: '108', author: userMap.get('2')!, content: 'Fresh post 8', createdAt: new Date(Date.now() - 1000 * 60 * 8).toISOString(), likeCount: 0, dislikeCount: 0, laughCount: 0, repostCount: 0, commentCount: 0, userReaction: 'NONE' },
+  { id: '109', author: userMap.get('3')!, content: 'Fresh post 9', createdAt: new Date(Date.now() - 1000 * 60 * 9).toISOString(), likeCount: 0, dislikeCount: 0, laughCount: 0, repostCount: 0, commentCount: 0, userReaction: 'NONE' },
+  { id: '110', author: userMap.get('1')!, content: 'Fresh post 10', createdAt: new Date(Date.now() - 1000 * 60 * 10).toISOString(), likeCount: 0, dislikeCount: 0, laughCount: 0, repostCount: 0, commentCount: 0, userReaction: 'NONE' },
+  { id: '111', author: userMap.get('2')!, content: 'Fresh post 11', createdAt: new Date(Date.now() - 1000 * 60 * 11).toISOString(), likeCount: 0, dislikeCount: 0, laughCount: 0, repostCount: 0, commentCount: 0, userReaction: 'NONE' },
+  { id: '112', author: userMap.get('3')!, content: 'Fresh post 12', createdAt: new Date(Date.now() - 1000 * 60 * 12).toISOString(), likeCount: 0, dislikeCount: 0, laughCount: 0, repostCount: 0, commentCount: 0, userReaction: 'NONE' },
+  { id: '113', author: userMap.get('1')!, content: 'Fresh post 13', createdAt: new Date(Date.now() - 1000 * 60 * 13).toISOString(), likeCount: 0, dislikeCount: 0, laughCount: 0, repostCount: 0, commentCount: 0, userReaction: 'NONE' },
+  { id: '114', author: userMap.get('2')!, content: 'Fresh post 14', createdAt: new Date(Date.now() - 1000 * 60 * 14).toISOString(), likeCount: 0, dislikeCount: 0, laughCount: 0, repostCount: 0, commentCount: 0, userReaction: 'NONE' },
+  { id: '115', author: userMap.get('3')!, content: 'Fresh post 15', createdAt: new Date(Date.now() - 1000 * 60 * 15).toISOString(), likeCount: 0, dislikeCount: 0, laughCount: 0, repostCount: 0, commentCount: 0, userReaction: 'NONE' },
+  { id: '116', author: userMap.get('1')!, content: 'Fresh post 16', createdAt: new Date(Date.now() - 1000 * 60 * 16).toISOString(), likeCount: 0, dislikeCount: 0, laughCount: 0, repostCount: 0, commentCount: 0, userReaction: 'NONE' },
+  { id: '117', author: userMap.get('2')!, content: 'Fresh post 17', createdAt: new Date(Date.now() - 1000 * 60 * 17).toISOString(), likeCount: 0, dislikeCount: 0, laughCount: 0, repostCount: 0, commentCount: 0, userReaction: 'NONE' },
+  { id: '118', author: userMap.get('3')!, content: 'Fresh post 18', createdAt: new Date(Date.now() - 1000 * 60 * 18).toISOString(), likeCount: 0, dislikeCount: 0, laughCount: 0, repostCount: 0, commentCount: 0, userReaction: 'NONE' },
+  { id: '119', author: userMap.get('1')!, content: 'Fresh post 19', createdAt: new Date(Date.now() - 1000 * 60 * 19).toISOString(), likeCount: 0, dislikeCount: 0, laughCount: 0, repostCount: 0, commentCount: 0, userReaction: 'NONE' },
+  { id: '120', author: userMap.get('2')!, content: 'Fresh post 20', createdAt: new Date(Date.now() - 1000 * 60 * 20).toISOString(), likeCount: 0, dislikeCount: 0, laughCount: 0, repostCount: 0, commentCount: 0, userReaction: 'NONE' },
 ];
 
+// Mock initial data
+followingIDs.add('1'); // Following John Doe
+followingIDs.add('2'); // Following Jane Smith
+mutedUsers.add('bob'); // Muted Bob
+blockedUsersIDs.add('6'); // Blocked David
+
+hashtagUsage.set('coding', 15);
+hashtagUsage.set('expo', 10);
+hashtagUsage.set('supabase', 8);
+hashtagUsage.set('pre2023', 25);
+
+allNotifications.push({
+  id: 'notif-1',
+  type: 'MENTION',
+  actor: userMap.get('1')!,
+  recipientId: '0',
+  postId: '101',
+  postSnippet: 'Hey @currentuser have you seen this?',
+  createdAt: new Date(Date.now() - 1000 * 60 * 10).toISOString(),
+  isRead: false,
+});
+allNotifications.push({
+  id: 'notif-2',
+  type: 'FOLLOW',
+  actor: userMap.get('2')!,
+  recipientId: '0',
+  createdAt: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
+  isRead: true,
+});
+
+const mockConversations: Conversation[] = [
+  {
+    id: 'conv-1',
+    participants: [userMap.get('0')!, userMap.get('1')!],
+    lastMessage: {
+      id: 'msg-1',
+      senderId: '1',
+      text: 'Hey! How are you doing?',
+      createdAt: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(),
+    },
+    unreadCount: 1,
+  },
+  {
+    id: 'conv-2',
+    participants: [userMap.get('0')!, userMap.get('2')!],
+    lastMessage: {
+      id: 'msg-2',
+      senderId: '0',
+      text: 'Check out this post!',
+      createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(),
+    },
+    unreadCount: 0,
+  }
+];
+
+const feedEngine = new FeedEngine({
+  fetchAuthorTimeline: async (authorId: string) => {
+    return allPosts.filter(post =>
+      post.author.id === authorId || post.repostedBy?.id === authorId
+    );
+  },
+  getFollowedAuthorIds: async (_userId: string) => {
+    const ids = Array.from(followingIDs);
+    if (!ids.includes('0')) ids.push('0'); // Always include self
+    return ids;
+  }
+});
+
 export const api = {
-  createPost: async (post: { content: string }): Promise<Post> => {
-    console.log(`Creating post with content: ${post.content}`);
+  createPost: async (post: { content: string, quotedPostId?: string }): Promise<Post> => {
+    const quotedPost = post.quotedPostId ? allPosts.find(p => p.id === post.quotedPostId) : undefined;
     const newPost: Post = {
       id: (allPosts.length + 1).toString(),
       author: userMap.get('0')!,
@@ -58,226 +168,223 @@ export const api = {
       repostCount: 0,
       commentCount: 0,
       userReaction: 'NONE',
+      quotedPost,
     };
     allPosts.unshift(newPost);
-    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Phase-6: Discovery & Awareness
+    const mentions = parseMentions(post.content);
+    mentions.forEach(username => {
+      const recipient = allUsers.find(u => u.username === username);
+      if (recipient && recipient.id !== '0') {
+        createNotification({
+          type: 'MENTION',
+          actor: userMap.get('0')!,
+          recipientId: recipient.id,
+          postId: newPost.id,
+          postSnippet: post.content.substring(0, 50)
+        });
+      }
+    });
+
+    const hashtags = parseHashtags(post.content);
+    hashtags.forEach(tag => {
+      hashtagUsage.set(tag, (hashtagUsage.get(tag) || 0) + 1);
+    });
+
+    if (quotedPost) {
+      createNotification({
+        type: 'QUOTE',
+        actor: userMap.get('0')!,
+        recipientId: quotedPost.author.id,
+        postId: newPost.id,
+        postSnippet: post.content.substring(0, 50)
+      });
+    }
+
+    feedEngine.invalidateCache('0');
     return newPost;
   },
 
   createPoll: async (poll: { question: string, choices: PollChoice[] }): Promise<Post> => {
-    console.log(`Creating poll with question: ${poll.question} and choices: ${poll.choices.map(c => c.text).join(', ')}`)
     const newPost: Post = {
       id: (allPosts.length + 1).toString(),
       author: userMap.get('0')!,
       content: poll.question,
-      poll: {
-        choices: poll.choices.map(choice => ({ ...choice, vote_count: 0 })),
-        question: ""
-      },
+      poll: { choices: poll.choices.map(c => ({ ...c, vote_count: 0 })), question: "" },
       createdAt: new Date().toISOString(),
-      likeCount: 0,
-      dislikeCount: 0,
-      laughCount: 0,
-      repostCount: 0,
-      commentCount: 0,
-      userReaction: 'NONE',
+      likeCount: 0, dislikeCount: 0, laughCount: 0, repostCount: 0, commentCount: 0, userReaction: 'NONE',
     };
     allPosts.unshift(newPost);
-    await new Promise(resolve => setTimeout(resolve, 500));
+    feedEngine.invalidateCache('0');
     return newPost;
   },
 
   fetchFeed: async (cursor?: string): Promise<{ posts: Post[], nextCursor: string | undefined }> => {
-    console.log(`Fetching feed with cursor: ${cursor}`);
-    const pageSize = 4;
-    const startIndex = cursor ? parseInt(cursor, 10) : 0;
-    
-    await new Promise(resolve => setTimeout(resolve, 500));
+    let structuredCursor: any = undefined;
+    try {
+      if (cursor) structuredCursor = JSON.parse(cursor);
+    } catch (e) { }
 
-    const filteredPosts = allPosts.filter(post => {
-      const author = userMap.get(post.author.id);
-      if (!author) return false;
-
-      if (author.is_shadow_banned) return false;
-
-      return (
-        !blockedUsers.has(author.username) &&
-        !mutedUsers.has(author.username) &&
-        author.is_active &&
-        !author.is_suspended
-      );
+    const response = await feedEngine.fetchFeed({
+      userId: '0',
+      cursor: structuredCursor,
+      pageSize: 4,
+      depth: structuredCursor ? 1 : 0,
     });
 
-    const posts = filteredPosts.slice(startIndex, startIndex + pageSize);
-    const nextCursor = startIndex + pageSize < filteredPosts.length ? (startIndex + pageSize).toString() : undefined;
-
     return {
-      posts,
-      nextCursor,
+      posts: response.posts,
+      nextCursor: response.nextCursor ? JSON.stringify(response.nextCursor) : undefined,
     };
   },
 
   fetchPost: async (postId: string): Promise<Post | undefined> => {
-    console.log(`Fetching post with id: ${postId}`);
-    await new Promise(resolve => setTimeout(resolve, 500));
-    const post = allPosts.find(p => p.id === postId);
-
-    if (!post) return undefined;
-
-    const author = userMap.get(post.author.id);
-    if (!author) return undefined;
-
-    if (author.is_shadow_banned || author.is_suspended || !author.is_active || blockedUsers.has(author.username) || mutedUsers.has(author.username)) {
-      return undefined;
-    }
-    return post;
+    return allPosts.find(p => p.id === postId);
   },
 
+  fetchUser: async (username: string): Promise<User | undefined> => {
+    return allUsers.find(u => u.username === username);
+  },
+
+  fetchUserRelationship: async (targetUserId: string): Promise<ViewerRelationship> => {
+    if (targetUserId === '0') return { type: 'SELF' };
+    if (blockedUsersIDs.has(targetUserId)) return { type: 'BLOCKED' };
+    const isFollowing = followingIDs.has(targetUserId);
+    const targetUser = userMap.get(targetUserId);
+    const isMuted = targetUser ? mutedUsers.has(targetUser.username) : false;
+    if (isFollowing) return isMuted ? { type: 'MUTED' } : { type: 'FOLLOWING' };
+    return { type: 'NOT_FOLLOWING' };
+  },
+
+  followUser: async (userId: string) => {
+    followingIDs.add(userId);
+    createNotification({
+      type: 'FOLLOW',
+      actor: userMap.get('0')!,
+      recipientId: userId
+    });
+    feedEngine.invalidateCache();
+  },
+  unfollowUser: async (userId: string) => { followingIDs.delete(userId); feedEngine.invalidateCache(); },
+
+  muteUser: async (userId: string) => {
+    const user = userMap.get(userId);
+    if (user) mutedUsers.add(user.username);
+    feedEngine.invalidateCache();
+  },
+  unmuteUser: async (userId: string) => {
+    const user = userMap.get(userId);
+    if (user) mutedUsers.delete(user.username);
+    feedEngine.invalidateCache();
+  },
+
+  blockUser: async (userId: string) => { blockedUsersIDs.add(userId); feedEngine.invalidateCache(); },
+  unblockUser: async (userId: string) => { blockedUsersIDs.delete(userId); feedEngine.invalidateCache(); },
+
   getProfile: async (userId: string): Promise<UserProfile> => {
-      const user = userMap.get(userId);
-      if(!user) throw new Error("User not found");
-      return user;
+    const user = userMap.get(userId);
+    if (!user) throw new Error("User not found");
+    return user;
   },
 
   getProfileByUsername: async (username: string): Promise<UserProfile> => {
     const user = allUsers.find(u => u.username === username);
-    if(!user) throw new Error("User not found");
+    if (!user) throw new Error("User not found");
     return user;
   },
 
-  getPostsByUser: async (userId: string): Promise<Post[]> => {
-    return allPosts.filter(p => p.author.id === userId);
-  },
+  getProfilePosts: async (userId: string) => allPosts.filter(p => p.author.id === userId && !p.repostedBy),
+  getProfileReplies: async (userId: string) => allPosts.filter(p => p.author.id === userId && (p.parentPostId || p.quotedPost)),
+  getProfileMedia: async (userId: string) => allPosts.filter(p => p.author.id === userId && p.media && p.media.length > 0),
+  getProfileReactions: async (_userId: string) => allPosts.filter(p => p.userReaction === 'LIKE' || p.userReaction === 'DISLIKE'),
 
-  updateProfile: async (updates: Partial<UserProfile>): Promise<void> => {
-    console.log('Updating profile with', updates);
-    const currentUser = userMap.get('0');
-    if (currentUser) {
-        Object.assign(currentUser, updates);
+  getFollowing: async (_userId: string) => allUsers.filter(u => followingIDs.has(u.id)),
+  getFollowers: async (_userId: string) => allUsers.slice(0, 3), // Mock
+
+  react: async (postId: string, action: ReactionAction) => {
+    const post = allPosts.find(p => p.id === postId);
+    if (post) {
+      const prevReaction = post.userReaction;
+      post.userReaction = action;
+
+      if (action !== 'NONE' && action !== prevReaction) {
+        createNotification({
+          type: 'REACTION',
+          actor: userMap.get('0')!,
+          recipientId: post.author.id,
+          postId: post.id,
+          postSnippet: post.content.substring(0, 50)
+        });
+      }
     }
-    await new Promise(resolve => setTimeout(resolve, 500));
   },
 
-  muteUser: async (userId: string): Promise<void> => {
-    console.log(`Muting user @${userId}`);
-    const user = userMap.get(userId);
-    if (user) {
-      mutedUsers.add(user.username);
+  repost: async (postId: string) => {
+    const post = allPosts.find(p => p.id === postId);
+    if (post) {
+      post.isReposted = !post.isReposted;
+      post.repostCount += post.isReposted ? 1 : -1;
+
+      if (post.isReposted) {
+        const repostEntry: Post = {
+          ...post,
+          id: `repost-${post.id}-${Date.now()}`,
+          repostedBy: userMap.get('0')!,
+          createdAt: new Date().toISOString()
+        };
+        allPosts.unshift(repostEntry);
+
+        createNotification({
+          type: 'REPOST',
+          actor: userMap.get('0')!,
+          recipientId: post.author.id,
+          postId: post.id,
+          postSnippet: post.content.substring(0, 50)
+        });
+      } else {
+        const idx = allPosts.findIndex(p => p.repostedBy?.id === '0' && p.id.startsWith(`repost-${post.id}`));
+        if (idx !== -1) allPosts.splice(idx, 1);
+      }
+
+      feedEngine.invalidateCache('0');
     }
-    await new Promise(resolve => setTimeout(resolve, 500));
-    return;
   },
 
-  blockUser: async (userId: string): Promise<void> => {
-    console.log(`Blocking user @${userId}`);
-    const user = userMap.get(userId);
-    if (user) {
-      blockedUsers.add(user.username);
-    }
+  fetchNotifications: async (): Promise<Notification[]> => {
     await new Promise(resolve => setTimeout(resolve, 500));
-    return;
+    return allNotifications.filter(n => n.recipientId === '0');
   },
 
-  createReport: async (
-    entityType: ReportableEntityType,
-    entityId: string,
-    reportType: ReportType,
-    reporterId: string,
-    reason?: string
-  ): Promise<Report> => {
-    console.log(`Creating report for ${entityType} ${entityId} of type ${reportType}`);
+  getTrends: async (): Promise<{ hashtag: string, count: number }[]> => {
+    return Array.from(hashtagUsage.entries())
+      .map(([hashtag, count]) => ({ hashtag, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+  },
+
+  search: async (query: string): Promise<{ posts: Post[], users: User[] }> => {
+    const q = query.toLowerCase();
+    const posts = allPosts.filter(p => !p.repostedBy && p.content.toLowerCase().includes(q));
+    const users = allUsers.filter(u => u.username.toLowerCase().includes(q) || u.name.toLowerCase().includes(q));
+    return { posts, users };
+  },
+
+  updateProfile: async (updates: Partial<UserProfile>) => {
+    const user = userMap.get('0');
+    if (user) Object.assign(user, updates);
+  },
+
+  createReport: async (entityType: ReportableEntityType, entityId: string, reportType: ReportType, reporterId: string, reason?: string) => {
     return createReportApi(entityType, entityId, reportType, reporterId, reason);
   },
 
-  react: async (postId: string, action: ReactionAction): Promise<void> => {
-    console.log(`Reacting to post ${postId} with ${action}`);
+  getConversations: async (): Promise<Conversation[]> => {
     await new Promise(resolve => setTimeout(resolve, 500));
-    return;
-  },
-  
-  batchReact: async (reactions: PendingReaction[]): Promise<void> => {
-    console.log('Batching reactions:', reactions);
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    return;
+    return mockConversations;
   },
 
-  repost: async (postId: string): Promise<void> => {
-    console.log(`Reposting post ${postId}`);
-    await new Promise(resolve => setTimeout(resolve, 500));
-    return;
-  },
-
-  quote: async (postId: string, text: string): Promise<void> => {
-    console.log(`Quoting post ${postId} with text: \"${text}\"`);
-    await new Promise(resolve => setTimeout(resolve, 500));
-    return;
-  },
-
-  bookmark: async (postId: string): Promise<void> => {
-    console.log(`Bookmarking post ${postId}`);
-    await new Promise(resolve => setTimeout(resolve, 500));
-    return;
-  },
-
-  forgotPassword: async (email: string): Promise<void> => {
-    console.log(`Sending password reset link to ${email}`);
-    await new Promise(resolve => setTimeout(resolve, 500));
-    return;
-  },
-
-  fetchAllUsers: async (): Promise<User[]> => {
-    console.log('Fetching all users');
-    await new Promise(resolve => setTimeout(resolve, 500));
-    return allUsers;
-  },
-
-  updateUser: async (userId: string, updates: Partial<User>): Promise<void> => {
-    console.log(`Updating user ${userId} with`, updates);
-    const user = allUsers.find(u => u.id === userId);
-    if (user) {
-      Object.assign(user, updates);
-    }
-    await new Promise(resolve => setTimeout(resolve, 500));
-    return;
-  },
-
-  fetchUser: async (username: string): Promise<User | undefined> => {
-    console.log(`Fetching user @${username}`);
-    await new Promise(resolve => setTimeout(resolve, 500));
-    const user = allUsers.find(u => u.username === username);
-    if (user && (user.is_suspended || !user.is_active)) {
-        return undefined;
-    }
-    return user;
-  },
-
-  followUser: async (userId: string): Promise<void> => {
-    console.log(`Following user ${userId}`);
-    return new Promise((resolve, reject) => {
-      setTimeout(() => {
-        if (Math.random() > 0.2) {
-          console.log(`Successfully followed user ${userId}`);
-          resolve();
-        } else {
-          console.log(`Failed to follow user ${userId}`);
-          reject(new Error('API Error'));
-        }
-      }, 500);
-    });
-  },
-
-  unfollowUser: async (userId: string): Promise<void> => {
-    console.log(`Unfollowing user ${userId}`);
-    return new Promise((resolve, reject) => {
-      setTimeout(() => {
-        if (Math.random() > 0.2) {
-          console.log(`Successfully unfollowed user ${userId}`);
-          resolve();
-        } else {
-          console.log(`Failed to unfollow user ${userId}`);
-          reject(new Error('API Error'));
-        }
-      }, 500);
-    });
-  },
+  getConversation: async (convId: string): Promise<Conversation | undefined> => {
+    return mockConversations.find(c => c.id === convId);
+  }
 };

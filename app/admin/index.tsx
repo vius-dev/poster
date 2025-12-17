@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, FlatList, Switch, Alert, TextInput, TouchableOpacity } from 'react-native';
-import { User } from '../../types/user';
+import { User } from '@/types/user';
 import { fetchAllUsers, updateUser } from './api'; // Using the new admin API
 import { Link } from 'expo-router';
 

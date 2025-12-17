@@ -12,7 +12,7 @@ interface ReactionBarProps {
   postId: string;
   onComment: () => void;
   onRepost: () => void;
-  onReaction: (action: 'LIKE' | 'DISLIKE' | 'LAUGH') => void;
+  onReaction: (action: ReactionAction) => void;
   reaction: ReactionAction;
   initialCounts: {
     likes: number;
@@ -21,21 +21,32 @@ interface ReactionBarProps {
     reposts: number;
     comments: number;
   };
+  isReposted?: boolean;
 }
 
-export default function ReactionBar({ postId, onComment, onRepost, onReaction, reaction, initialCounts }: ReactionBarProps) {
-  const { likeCounts, setLikeCount } = useRealtime();
+export default function ReactionBar({ postId, onComment, onRepost, onReaction, reaction, initialCounts, isReposted }: ReactionBarProps) {
+  const { counts, initializeCounts } = useRealtime();
   const { theme } = useTheme();
 
   useEffect(() => {
-    if (initialCounts.likes !== undefined) {
-      setLikeCount(postId, initialCounts.likes);
-    }
+    initializeCounts(postId, {
+      likes: initialCounts.likes,
+      dislikes: initialCounts.dislikes,
+      laughs: initialCounts.laughs,
+      reposts: initialCounts.reposts,
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialCounts.likes, postId]);
+  }, [postId]);
 
-  const likeCount = likeCounts[postId] ?? initialCounts.likes;
+  const currentCounts = counts[postId] || {
+    likes: initialCounts.likes,
+    dislikes: initialCounts.dislikes,
+    laughs: initialCounts.laughs,
+    reposts: initialCounts.reposts,
+  };
+
   const iconColor = theme.textTertiary;
+  const repostColor = isReposted ? theme.primary : iconColor;
 
   return (
     <View style={styles.container}>
@@ -44,20 +55,20 @@ export default function ReactionBar({ postId, onComment, onRepost, onReaction, r
         <Text style={[styles.count, { color: iconColor }]}>{initialCounts.comments}</Text>
       </TouchableOpacity>
       <TouchableOpacity onPress={onRepost} style={styles.button}>
-        <Ionicons name="repeat-outline" size={20} color={iconColor} />
-        <Text style={[styles.count, { color: iconColor }]}>{initialCounts.reposts}</Text>
+        <Ionicons name={isReposted ? "repeat" : "repeat-outline"} size={20} color={repostColor} />
+        <Text style={[styles.count, { color: repostColor }]}>{currentCounts.reposts}</Text>
       </TouchableOpacity>
       <TouchableOpacity onPress={() => onReaction('LIKE')} style={styles.button}>
         <Ionicons name={reaction === 'LIKE' ? 'heart' : 'heart-outline'} size={20} color={reaction === 'LIKE' ? theme.like : iconColor} />
-        <Text style={[styles.count, { color: iconColor }]}>{likeCount}</Text>
+        <Text style={[styles.count, { color: iconColor }]}>{currentCounts.likes}</Text>
       </TouchableOpacity>
       <TouchableOpacity onPress={() => onReaction('DISLIKE')} style={styles.button}>
         <FontAwesome5 name="heart-broken" size={17} color={reaction === 'DISLIKE' ? theme.primary : iconColor} />
-        <Text style={[styles.count, { color: iconColor }]}>{initialCounts.dislikes}</Text>
+        <Text style={[styles.count, { color: iconColor }]}>{currentCounts.dislikes}</Text>
       </TouchableOpacity>
       <TouchableOpacity onPress={() => onReaction('LAUGH')} style={styles.button}>
         <GrinTearsIcon size={17} active={reaction === 'LAUGH'} />
-        <Text style={[styles.count, { color: iconColor }]}>{initialCounts.laughs}</Text>
+        <Text style={[styles.count, { color: iconColor }]}>{currentCounts.laughs}</Text>
       </TouchableOpacity>
     </View>
   );

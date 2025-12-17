@@ -12,6 +12,7 @@ export type User = {
     is_limited: boolean;
     is_shadow_banned: boolean;
     is_suspended: boolean;
+    is_muted: boolean;
 };
 
 export type UserProfile = User;

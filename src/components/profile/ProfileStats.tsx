@@ -1,6 +1,7 @@
 
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { useTheme } from '@/theme/theme';
 
 interface ProfileStatsProps {
   postCount: number;
@@ -8,6 +9,8 @@ interface ProfileStatsProps {
   followerCount: number;
   onFollowingPress: () => void;
   onFollowersPress: () => void;
+  onPostsPress?: () => void;
+  activeTab?: string;
 }
 
 export default function ProfileStats({
@@ -16,20 +19,37 @@ export default function ProfileStats({
   followerCount,
   onFollowingPress,
   onFollowersPress,
+  onPostsPress,
+  activeTab,
 }: ProfileStatsProps) {
+  const { theme } = useTheme();
+
+  const isPostsActive = activeTab === 'Posts';
+  const isFollowingActive = activeTab === 'Following';
+  const isFollowersActive = activeTab === 'Followers';
+
   return (
-    <View style={styles.container}>
-      <View style={styles.stat}>
-        <Text style={styles.statValue}>{postCount}</Text>
-        <Text style={styles.statLabel}>Posts</Text>
-      </View>
-      <TouchableOpacity style={styles.stat} onPress={onFollowingPress}>
-        <Text style={styles.statValue}>{followingCount}</Text>
-        <Text style={styles.statLabel}>Following</Text>
+    <View style={[styles.container, { borderColor: theme.borderLight, borderTopWidth: 1, borderBottomWidth: 1 }]}>
+      <TouchableOpacity
+        style={[styles.stat, isPostsActive && { borderBottomWidth: 2, borderBottomColor: theme.primary }]}
+        onPress={onPostsPress}
+      >
+        <Text style={[styles.statValue, { color: theme.textPrimary }]}>{postCount}</Text>
+        <Text style={[styles.statLabel, { color: isPostsActive ? theme.primary : theme.textTertiary }]}>Posts</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={styles.stat} onPress={onFollowersPress}>
-        <Text style={styles.statValue}>{followerCount}</Text>
-        <Text style={styles.statLabel}>Followers</Text>
+      <TouchableOpacity
+        style={[styles.stat, isFollowingActive && { borderBottomWidth: 2, borderBottomColor: theme.primary }]}
+        onPress={onFollowingPress}
+      >
+        <Text style={[styles.statValue, { color: theme.textPrimary }]}>{followingCount}</Text>
+        <Text style={[styles.statLabel, { color: isFollowingActive ? theme.primary : theme.textTertiary }]}>Following</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.stat, isFollowersActive && { borderBottomWidth: 2, borderBottomColor: theme.primary }]}
+        onPress={onFollowersPress}
+      >
+        <Text style={[styles.statValue, { color: theme.textPrimary }]}>{followerCount}</Text>
+        <Text style={[styles.statLabel, { color: isFollowersActive ? theme.primary : theme.textTertiary }]}>Followers</Text>
       </TouchableOpacity>
     </View>
   );

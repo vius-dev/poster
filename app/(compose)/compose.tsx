@@ -14,19 +14,40 @@ import {
   Image,
   Alert,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '@/theme/theme';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { api } from '@/lib/api';
+import QuotedPost from '@/components/QuotedPost';
+import { Post } from '@/types/post';
+import { useEffect } from 'react';
 
 const MAX_CHARACTERS = 280;
 
 const ComposeScreen = () => {
   const { theme } = useTheme();
   const router = useRouter();
+  const { quotePostId } = useLocalSearchParams<{ quotePostId: string }>();
   const [text, setText] = useState('');
   const [media, setMedia] = useState<ImagePicker.ImagePickerAsset[]>([]);
+  const [quotedPost, setQuotedPost] = useState<Post | null>(null);
+
+  useEffect(() => {
+    if (quotePostId) {
+      const fetchQuotedPost = async () => {
+        try {
+          const post = await api.fetchPost(quotePostId);
+          if (post) {
+            setQuotedPost(post);
+          }
+        } catch (error) {
+          console.error('Failed to fetch quoted post', error);
+        }
+      };
+      fetchQuotedPost();
+    }
+  }, [quotePostId]);
 
   const characterCount = text.length;
   const isPostButtonDisabled = characterCount === 0 || characterCount > MAX_CHARACTERS;
@@ -49,7 +70,10 @@ const ComposeScreen = () => {
 
   const handlePost = async () => {
     try {
-      await api.createPost({ content: text });
+      await api.createPost({
+        content: text,
+        quotedPostId: quotePostId || undefined
+      });
       router.back();
     } catch (error) {
       console.error('Failed to create post', error);
@@ -142,6 +166,7 @@ const ComposeScreen = () => {
             value={text}
             onChangeText={setText}
           />
+          {quotedPost && <QuotedPost post={quotedPost} />}
         </ScrollView>
 
         <View style={[styles.footer, { borderTopColor: theme.border }]}>

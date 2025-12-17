@@ -1,7 +1,7 @@
 
-import { Report } from '../../types/reports';
-import { User } from '../../types/user';
-import { Post, Author, Comment } from '../../types/post';
+import { Report } from '@/types/reports';
+import { User } from '@/types/user';
+import { Post, Author, Comment } from '@/types/post';
 
 // --- MOCK DATABASE ---
 let mockUsers: User[] = [

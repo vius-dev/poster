@@ -21,7 +21,7 @@ There are **no separate “My Profile” and “User Profile” screens**.
 ## 2. Screen Structure (Top → Bottom)
 
 ```
-SafeAreaView
+SafeAreaView using (react-native-safe-area-context)
  └─ ScrollView
      ├─ ProfileHeader
      ├─ BioSection
@@ -136,7 +136,7 @@ This row is **100% state-driven**.
 * Posts
 * Posts & Replies
 * Media
-* Likes
+* Dis/Likes
 
 ### Behavior
 

@@ -22,8 +22,8 @@ Upgrade the existing Twitter-like Expo + Supabase app to support:
 * Server reconciliation & idempotency
 * Correctness locks that **cannot be bypassed by UI or network**
 
-❗This phase **does not** add new features.
-It hardens what already exists.
+❗This phase **does not** add 1 new feature "LAUGH".
+It also hardens what already exists.
 
 ---
 
@@ -32,8 +32,8 @@ It hardens what already exists.
 These **must never break**:
 
 1. One reaction per user per post
-2. Allowed states: `NONE | LIKE | DISLIKE`
-3. LIKE and DISLIKE are mutually exclusive
+2. Allowed states: `NONE | LIKE | DISLIKE | LAUGH`
+3. LIKE, DISLIKE and LAUGH are mutually exclusive
 4. Final state always wins
 5. Reaction operations are idempotent
 6. Counts are derived, never guessed
@@ -86,7 +86,7 @@ Implement a **persistent queue**:
 ```ts
 type PendingReaction = {
   postId: string
-  finalState: 'LIKE' | 'DISLIKE' | 'NONE'
+  finalState: 'LIKE' | 'DISLIKE' | 'LAUGH' | 'NONE'
   pressCount: number
   lastUpdatedAt: number
 }
@@ -150,13 +150,14 @@ A **reaction press** is:
 
 * Like
 * Dislike
+* Laugh
 * Remove
 * Switch
 
 ### Rule
 
 ```
-Max 4 presses per user per post per rolling window
+Max 5 presses per user per post per rolling window
 ```
 
 Applies:
@@ -248,7 +249,8 @@ Server response must include:
   postId,
   userReaction,
   likeCount,
-  dislikeCount
+  dislikeCount,
+  laughCount,
 }
 ```
 
@@ -299,7 +301,7 @@ Must pass:
 
 ---
 
-## 🧠 Final Instruction to Generator
+## 🧠 Final Instruction
 
 > Harden correctness, not features.
 >
@@ -308,11 +310,3 @@ Must pass:
 If behavior differs offline vs online — it’s wrong.
 
 ---
-
-## 📌 Next Phase (Phase-4)
-
-* Author timeline cache
-* Read replicas
-* Kill-switch hierarchy
-* Deep-scroll degradation
-

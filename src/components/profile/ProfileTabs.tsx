@@ -4,14 +4,14 @@ import { View, Text, TouchableOpacity, StyleSheet, Dimensions } from 'react-nati
 
 import { useTheme } from '@/theme/theme';
 
-export type ProfileTab = 'Posts' | 'Replies' | 'Media' | 'Dis/Likes';
+export type ProfileTab = 'Shop' | 'Posts' | 'Replies' | 'Media' | 'Dis/Likes' | 'Following' | 'Followers';
 
 interface ProfileTabsProps {
   selectedTab: ProfileTab;
   onSelectTab: (tab: ProfileTab) => void;
 }
 
-const tabs: ProfileTab[] = ['Posts', 'Replies', 'Media', 'Dis/Likes'];
+const tabs: ProfileTab[] = ['Shop', 'Replies', 'Media', 'Dis/Likes'];
 const { width } = Dimensions.get('window');
 
 export default function ProfileTabs({ selectedTab, onSelectTab }: ProfileTabsProps) {

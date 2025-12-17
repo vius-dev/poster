@@ -1,16 +1,88 @@
-import React from 'react';
-import { Text, StyleSheet } from 'react-native';
+
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '@/theme/theme';
-import HomeHeader from '@/components/HomeHeader';
+import { api } from '@/lib/api';
+import { Notification } from '@/types/notification';
+import NotificationItem from '@/components/NotificationItem';
+import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '@/providers/AuthProvider';
+import { Image } from 'react-native';
+
+type Tab = 'ALL' | 'MENTIONS';
 
 export default function NotificationsScreen() {
   const { theme } = useTheme();
+  const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState<Tab>('ALL');
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadNotifications();
+  }, []);
+
+  const loadNotifications = async () => {
+    setLoading(true);
+    try {
+      const data = await api.fetchNotifications();
+      setNotifications(data);
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filteredNotifications = notifications.filter(n => {
+    if (activeTab === 'ALL') return true;
+    return n.type === 'MENTION' || n.type === 'REPLY';
+  });
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
-      <HomeHeader />
-      <Text style={{ color: theme.textPrimary, flex: 1, textAlignVertical: 'center' }}>Notifications Screen</Text>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
+      {/* Header */}
+      <View style={[styles.header, { borderBottomColor: theme.border }]}>
+        <View style={styles.headerTop}>
+          <Image source={{ uri: user?.avatar }} style={styles.avatar} />
+          <Text style={[styles.headerTitle, { color: theme.textPrimary }]}>Notifications</Text>
+          <TouchableOpacity>
+            <Ionicons name="settings-outline" size={24} color={theme.primary} />
+          </TouchableOpacity>
+        </View>
+
+        {/* Tabs */}
+        <View style={styles.tabsContainer}>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'ALL' && { borderBottomColor: theme.primary }]}
+            onPress={() => setActiveTab('ALL')}
+          >
+            <Text style={[styles.tabLabel, { color: activeTab === 'ALL' ? theme.textPrimary : theme.textTertiary }]}>All</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'MENTIONS' && { borderBottomColor: theme.primary }]}
+            onPress={() => setActiveTab('MENTIONS')}
+          >
+            <Text style={[styles.tabLabel, { color: activeTab === 'MENTIONS' ? theme.textPrimary : theme.textTertiary }]}>Mentions</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <FlatList
+        data={filteredNotifications}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item }) => <NotificationItem notification={item} />}
+        refreshing={loading}
+        onRefresh={loadNotifications}
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
+              {activeTab === 'ALL' ? 'Nothing to see here — yet.' : 'When someone mentions you, you’ll find it here.'}
+            </Text>
+          </View>
+        }
+      />
     </SafeAreaView>
   );
 }
@@ -18,6 +90,50 @@ export default function NotificationsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  header: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  headerTop: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 15,
+    height: 50,
+  },
+  avatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  tabsContainer: {
+    flexDirection: 'row',
+    height: 45,
+  },
+  tab: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  tabLabel: {
+    fontWeight: 'bold',
+    fontSize: 15,
+  },
+  emptyContainer: {
+    flex: 1,
+    padding: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyText: {
+    fontSize: 15,
+    textAlign: 'center',
+    lineHeight: 22,
   },
 });

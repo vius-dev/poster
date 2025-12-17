@@ -12,6 +12,7 @@ import ParsedText from 'react-native-parsed-text';
 import { api } from '@/lib/api';
 import { Post, ReactionAction } from '@/types/post';
 import { useTheme } from '@/theme/theme';
+import { useRealtime } from '@/realtime/RealtimeContext';
 
 interface PostCardProps {
   post: Post;
@@ -21,28 +22,82 @@ interface PostCardProps {
 export default function PostCard({ post, isFocal = false }: PostCardProps) {
   const router = useRouter();
   const [reaction, setReaction] = useState(post.userReaction);
+  const [isReposted, setIsReposted] = useState(post.isReposted);
   const [isRepostModalVisible, setRepostModalVisible] = useState(false);
   const [isMenuVisible, setMenuVisible] = useState(false);
   const { theme } = useTheme();
+  const { counts, setCounts } = useRealtime();
 
   const handleComment = () => {
     router.push({ pathname: '/(compose)/reply', params: { replyToId: post.id, authorUsername: post.author.username } });
   };
 
+  const currentCounts = counts[post.id] || {
+    likes: post.likeCount,
+    dislikes: post.dislikeCount,
+    laughs: post.laughCount,
+    reposts: post.repostCount,
+  };
+
   const handleReaction = async (action: ReactionAction) => {
-    const currentReaction = reaction;
-    const newReaction = currentReaction === action ? 'NONE' : action;
-    setReaction(newReaction);
+    const prevReaction = reaction;
+    const nextReaction = prevReaction === action ? 'NONE' : action;
+
+    setReaction(nextReaction);
+
+    // Calculate count deltas
+    let likesDelta = 0;
+    let dislikesDelta = 0;
+    let laughsDelta = 0;
+
+    // Decrement previous if it wasn't NONE
+    if (prevReaction === 'LIKE') likesDelta--;
+    if (prevReaction === 'DISLIKE') dislikesDelta--;
+    if (prevReaction === 'LAUGH') laughsDelta--;
+
+    // Increment next if it isn't NONE
+    if (nextReaction === 'LIKE') likesDelta++;
+    if (nextReaction === 'DISLIKE') dislikesDelta++;
+    if (nextReaction === 'LAUGH') laughsDelta++;
+
+    setCounts(post.id, {
+      likes: currentCounts.likes + likesDelta,
+      dislikes: currentCounts.dislikes + dislikesDelta,
+      laughs: currentCounts.laughs + laughsDelta,
+    });
+
     try {
-      await api.react(post.id, newReaction);
+      await api.react(post.id, nextReaction);
     } catch (error) {
-      setReaction(currentReaction); // Revert on error
+      // Revert if API fails? 
+      // For now, let's keep it simple. Real reconciliation happens via batches in Phase-3.
+      setReaction(prevReaction);
+      setCounts(post.id, {
+        likes: currentCounts.likes,
+        dislikes: currentCounts.dislikes,
+        laughs: currentCounts.laughs,
+      });
     }
   };
 
-  const handleRepost = () => {
-    api.repost(post.id);
+  const handleRepost = async () => {
+    const nextReposted = !isReposted;
+    setIsReposted(nextReposted);
+
+    setCounts(post.id, {
+      reposts: currentCounts.reposts + (nextReposted ? 1 : -1),
+    });
+
     setRepostModalVisible(false);
+
+    try {
+      await api.repost(post.id);
+    } catch (error) {
+      setIsReposted(!nextReposted);
+      setCounts(post.id, {
+        reposts: currentCounts.reposts,
+      });
+    }
   };
 
   const handleQuote = () => {
@@ -126,11 +181,12 @@ export default function PostCard({ post, isFocal = false }: PostCardProps) {
           onRepost={() => setRepostModalVisible(true)}
           onReaction={handleReaction}
           reaction={reaction}
+          isReposted={isReposted}
           initialCounts={{
             likes: post.likeCount,
             dislikes: post.dislikeCount,
             laughs: post.laughCount,
-            reposts: post.repostCount,
+            reposts: currentCounts.reposts,
             comments: post.commentCount,
           }}
         />

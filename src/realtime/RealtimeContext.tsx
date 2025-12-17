@@ -3,13 +3,19 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { eventEmitter } from '@/lib/EventEmitter';
 
 interface RealtimeState {
-  likeCounts: {
-    [postId: string]: number;
+  counts: {
+    [postId: string]: {
+      likes: number;
+      dislikes: number;
+      laughs: number;
+      reposts: number;
+    };
   };
 }
 
 interface RealtimeContextType extends RealtimeState {
-  setLikeCount: (postId: string, count: number) => void;
+  setCounts: (postId: string, updates: Partial<RealtimeState['counts'][string]>) => void;
+  initializeCounts: (postId: string, initial: RealtimeState['counts'][string]) => void;
 }
 
 const RealtimeContext = createContext<RealtimeContextType | undefined>(
@@ -17,32 +23,48 @@ const RealtimeContext = createContext<RealtimeContextType | undefined>(
 );
 
 export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [state, setState] = useState<RealtimeState>({ likeCounts: {} });
+  const [state, setState] = useState<RealtimeState>({ counts: {} });
 
-  const setLikeCount = (postId: string, count: number) => {
+  const setCounts = (postId: string, updates: Partial<RealtimeState['counts'][string]>) => {
     setState((prevState) => ({
       ...prevState,
-      likeCounts: {
-        ...prevState.likeCounts,
-        [postId]: count,
+      counts: {
+        ...prevState.counts,
+        [postId]: {
+          ...(prevState.counts[postId] || { likes: 0, dislikes: 0, laughs: 0, reposts: 0 }),
+          ...updates,
+        },
       },
     }));
   };
 
+  const initializeCounts = (postId: string, initial: RealtimeState['counts'][string]) => {
+    setState((prevState) => {
+      if (prevState.counts[postId]) return prevState; // Don't overwrite existing dynamic state
+      return {
+        ...prevState,
+        counts: {
+          ...prevState.counts,
+          [postId]: initial,
+        },
+      };
+    });
+  };
+
   useEffect(() => {
-    const handleLikeCountUpdate = ({ postId, count }: { postId: string, count: number }) => {
-      setLikeCount(postId, count);
+    const handleCountUpdate = ({ postId, updates }: { postId: string, updates: Partial<RealtimeState['counts'][string]> }) => {
+      setCounts(postId, updates);
     };
 
-    eventEmitter.on('like-count-update', handleLikeCountUpdate);
+    eventEmitter.on('count-update', handleCountUpdate);
 
     return () => {
-      eventEmitter.off('like-count-update', handleLikeCountUpdate);
+      eventEmitter.off('count-update', handleCountUpdate);
     };
   }, []);
 
   return (
-    <RealtimeContext.Provider value={{ ...state, setLikeCount }}>
+    <RealtimeContext.Provider value={{ ...state, setCounts, initializeCounts }}>
       {children}
     </RealtimeContext.Provider>
   );

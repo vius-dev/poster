@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, FlatList, Alert, TouchableOpacity, TextInput } from 'react-native';
-import { Report } from '../../types/reports';
+import { Report } from '@/types/reports';
 import { fetchAllReports, dismissReport, deletePost } from './api';
-import { Post } from '../../types/post';
+import { Post } from '@/types/post';
 import { getPostById } from './api';
 
 const ReportedPost = ({ postId }: { postId: string }) => {

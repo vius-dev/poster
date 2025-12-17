@@ -11,6 +11,7 @@ import {
   Image,
   Alert,
   ScrollView,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/theme/theme';
@@ -29,10 +30,13 @@ const EditProfileScreen = () => {
   const [website, setWebsite] = useState('');
   const [avatar, setAvatar] = useState<string | null>(null);
   const [header, setHeader] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const fetchProfile = async () => {
       if (!user) return;
+      setIsLoading(true);
       try {
         const profile = await api.getProfile(user.id);
         setName(profile.name || '');
@@ -43,18 +47,26 @@ const EditProfileScreen = () => {
         setHeader(profile.headerImage || null);
       } catch (error) {
         console.error('Failed to fetch profile', error);
+      } finally {
+        setIsLoading(false);
       }
     };
     fetchProfile();
   }, [user]);
 
   const handleSave = async () => {
+    if (!name.trim()) {
+      Alert.alert('Error', 'Name is required.');
+      return;
+    }
+
+    setIsSaving(true);
     try {
       await api.updateProfile({
-        name,
-        bio,
-        location,
-        website,
+        name: name.trim(),
+        bio: bio.trim(),
+        location: location.trim(),
+        website: website.trim(),
         avatar: avatar || undefined,
         headerImage: header || undefined,
       });
@@ -64,14 +76,16 @@ const EditProfileScreen = () => {
     } catch (error) {
       console.error('Failed to update profile', error);
       Alert.alert('Error', 'Failed to update profile.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
-  const pickImage = async (setter: React.Dispatch<React.SetStateAction<string | null>>) => {
+  const pickImage = async (type: 'avatar' | 'header', setter: React.Dispatch<React.SetStateAction<string | null>>) => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
-      aspect: [4, 3],
+      aspect: type === 'avatar' ? [1, 1] : [3, 1],
       quality: 1,
     });
 
@@ -83,63 +97,77 @@ const EditProfileScreen = () => {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
       <View style={[styles.header, { borderBottomColor: theme.border }]}>
-        <Pressable onPress={() => router.back()}>
-          <Text style={[styles.headerButton, { color: theme.link }]}>Cancel</Text>
+        <Pressable onPress={() => router.back()} disabled={isSaving}>
+          <Text style={[styles.headerButton, { color: theme.link, opacity: isSaving ? 0.5 : 1 }]}>Cancel</Text>
         </Pressable>
-        <Pressable onPress={handleSave}>
-          <Text style={[styles.headerButton, { color: theme.link, fontWeight: 'bold' }]}>Save</Text>
+        <Pressable onPress={handleSave} disabled={isSaving}>
+          <Text style={[styles.headerButton, { color: theme.link, fontWeight: 'bold', opacity: isSaving ? 0.5 : 1 }]}>
+            {isSaving ? 'Saving...' : 'Save'}
+          </Text>
         </Pressable>
       </View>
 
       <ScrollView style={styles.scrollContainer}>
-        <TouchableOpacity onPress={() => pickImage(setHeader)}>
-          <Image source={{ uri: header || undefined }} style={[styles.headerImage, { backgroundColor: theme.border }]} />
-          <View style={styles.imageOverlay}>
-            <Ionicons name="camera" size={32} color="white" />
+        {isLoading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={theme.primary} />
           </View>
-        </TouchableOpacity>
+        ) : (
+          <>
+            <TouchableOpacity onPress={() => pickImage('header', setHeader)} disabled={isSaving}>
+              <Image source={{ uri: header || undefined }} style={[styles.headerImage, { backgroundColor: theme.border }]} />
+              <View style={styles.imageOverlay}>
+                <Ionicons name="camera" size={32} color="white" />
+              </View>
+            </TouchableOpacity>
 
-        <View style={styles.avatarContainer}>
-          <TouchableOpacity onPress={() => pickImage(setAvatar)}>
-            <Image source={{ uri: avatar || undefined }} style={[styles.avatar, { backgroundColor: theme.border, borderColor: theme.background }]} />
-            <View style={styles.imageOverlay_avatar}>
-                <Ionicons name="camera" size={24} color="white" />
+            <View style={styles.avatarContainer}>
+              <TouchableOpacity onPress={() => pickImage('avatar', setAvatar)} disabled={isSaving}>
+                <Image source={{ uri: avatar || undefined }} style={[styles.avatar, { backgroundColor: theme.border, borderColor: theme.background }]} />
+                <View style={styles.imageOverlay_avatar}>
+                  <Ionicons name="camera" size={24} color="white" />
+                </View>
+              </TouchableOpacity>
             </View>
-          </TouchableOpacity>
-        </View>
 
-        <View style={styles.formContainer}>
-          <TextInput
-            style={[styles.input, { color: theme.textPrimary, borderBottomColor: theme.border }]}
-            placeholder="Name"
-            placeholderTextColor={theme.textTertiary}
-            value={name}
-            onChangeText={setName}
-          />
-          <TextInput
-            style={[styles.input, { color: theme.textPrimary, borderBottomColor: theme.border }]}
-            placeholder="Bio"
-            placeholderTextColor={theme.textTertiary}
-            value={bio}
-            onChangeText={setBio}
-            multiline
-          />
-          <TextInput
-            style={[styles.input, { color: theme.textPrimary, borderBottomColor: theme.border }]}
-            placeholder="Location"
-            placeholderTextColor={theme.textTertiary}
-            value={location}
-            onChangeText={setLocation}
-          />
-          <TextInput
-            style={[styles.input, { color: theme.textPrimary, borderBottomColor: theme.border }]}
-            placeholder="Website"
-            placeholderTextColor={theme.textTertiary}
-            value={website}
-            onChangeText={setWebsite}
-            autoCapitalize="none"
-          />
-        </View>
+            <View style={styles.formContainer}>
+              <TextInput
+                style={[styles.input, { color: theme.textPrimary, borderBottomColor: theme.border }]}
+                placeholder="Name"
+                placeholderTextColor={theme.textTertiary}
+                value={name}
+                onChangeText={setName}
+                editable={!isSaving}
+              />
+              <TextInput
+                style={[styles.input, { color: theme.textPrimary, borderBottomColor: theme.border }]}
+                placeholder="Bio"
+                placeholderTextColor={theme.textTertiary}
+                value={bio}
+                onChangeText={setBio}
+                multiline
+                editable={!isSaving}
+              />
+              <TextInput
+                style={[styles.input, { color: theme.textPrimary, borderBottomColor: theme.border }]}
+                placeholder="Location"
+                placeholderTextColor={theme.textTertiary}
+                value={location}
+                onChangeText={setLocation}
+                editable={!isSaving}
+              />
+              <TextInput
+                style={[styles.input, { color: theme.textPrimary, borderBottomColor: theme.border }]}
+                placeholder="Website"
+                placeholderTextColor={theme.textTertiary}
+                value={website}
+                onChangeText={setWebsite}
+                autoCapitalize="none"
+                editable={!isSaving}
+              />
+            </View>
+          </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -187,7 +215,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.3)',
   },
-   imageOverlay_avatar: {
+  imageOverlay_avatar: {
     position: 'absolute',
     top: 0,
     left: 0,
@@ -205,6 +233,12 @@ const styles = StyleSheet.create({
     fontSize: 18,
     paddingVertical: 15,
     borderBottomWidth: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 100,
   },
 });
 

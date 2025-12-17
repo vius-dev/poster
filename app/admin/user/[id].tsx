@@ -2,9 +2,9 @@
 import { useLocalSearchParams } from 'expo-router';
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, FlatList, Alert, ActivityIndicator } from 'react-native';
-import { User } from '../../../types/user';
-import { Post, Comment } from '../../../types/post';
-import { Report } from '../../../types/reports';
+import { User } from '@/types/user';
+import { Post, Comment } from '@/types/post';
+import { Report } from '@/types/reports';
 import { getUserById, getPostsByAuthorId, getCommentsByAuthorId, getReportsByReporterId } from '../api';
 
 const UserDetailScreen = () => {

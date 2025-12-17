@@ -238,13 +238,3 @@ Client must:
 > Scale the read path **without touching truth**.
 >
 > A slower correct feed beats a fast wrong one.
-
----
-
-## 📌 Next Phase (Phase-5)
-
-* Abuse prevention
-* Shadow bans
-* Content moderation
-* Visibility rules
-* Spam heuristics

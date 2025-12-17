@@ -1,12 +1,15 @@
 
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, TouchableOpacity } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import Button from '@/components/Button';
+import { useTheme } from '@/theme/theme';
 
 export type ViewerRelationship =
   | { type: 'SELF' }
   | { type: 'NOT_FOLLOWING' }
   | { type: 'FOLLOWING' }
+  | { type: 'MUTED' }
   | { type: 'BLOCKED' };
 
 interface ProfileActionRowProps {
@@ -14,6 +17,7 @@ interface ProfileActionRowProps {
   onFollow: () => void;
   onUnfollow: () => void;
   onEditProfile: () => void;
+  onSettings?: () => void;
   isLoading: boolean;
   style?: any;
 }
@@ -23,17 +27,39 @@ export default function ProfileActionRow({
   onFollow,
   onUnfollow,
   onEditProfile,
+  onSettings,
   isLoading,
   style
 }: ProfileActionRowProps) {
+  const { theme } = useTheme();
+
   const renderButton = () => {
     switch (relationship.type) {
       case 'SELF':
-        return <Button text="Edit profile" onPress={onEditProfile} />;
+        return (
+          <View style={styles.row}>
+            <Button text="Edit profile" onPress={onEditProfile} />
+            <TouchableOpacity
+              onPress={onSettings}
+              style={[styles.iconButton, { borderColor: theme.borderLight }]}
+            >
+              <Ionicons name="settings-outline" size={20} color={theme.textPrimary} />
+            </TouchableOpacity>
+          </View>
+        );
       case 'NOT_FOLLOWING':
         return <Button text="Follow" onPress={onFollow} loading={isLoading} />;
       case 'FOLLOWING':
         return <Button text="Following" onPress={onUnfollow} variant="secondary" loading={isLoading} />;
+      case 'MUTED':
+        return (
+          <View style={styles.row}>
+            <Button text="Following" onPress={onUnfollow} variant="secondary" loading={isLoading} />
+            <View style={[styles.statusIcon, { borderColor: theme.borderLight }]}>
+              <Ionicons name="volume-mute-outline" size={20} color={theme.textTertiary} />
+            </View>
+          </View>
+        );
       case 'BLOCKED':
         return <Button text="Blocked" onPress={() => { }} variant="danger" />;
       default:
@@ -50,8 +76,30 @@ export default function ProfileActionRow({
 
 const styles = StyleSheet.create({
   container: {
-    // Default padding removed to fit into header better, or kept small
     flexDirection: 'row',
     alignItems: 'center',
   },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  iconButton: {
+    marginLeft: 8,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  statusIcon: {
+    marginLeft: 8,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    opacity: 0.7,
+  }
 });
