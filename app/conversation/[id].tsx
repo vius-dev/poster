@@ -21,7 +21,7 @@ export default function ConversationScreen() {
   const [newMessage, setNewMessage] = useState('');
 
   const currentUser: User = {
-    id: '0', name: 'Current User', username: 'currentuser',
+    id: '0', name: 'Dev Team', username: 'devteam',
     avatar: '',
     is_active: false,
     is_limited: false,

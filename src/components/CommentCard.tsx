@@ -1,5 +1,4 @@
-
-import React, { useState } from 'react';
+import React, { useEffect } from 'react';
 import { View, Text, StyleSheet, Image, Pressable, TouchableOpacity } from 'react-native';
 import { Comment, ReactionAction } from '@/types/post';
 import { useTheme } from '@/theme/theme';
@@ -8,6 +7,7 @@ import { api } from '@/lib/api';
 import { useRouter } from 'expo-router';
 import { timeAgo } from '@/utils/time';
 import MediaGrid from './MediaGrid';
+import { useRealtime } from '@/realtime/RealtimeContext';
 
 const INDENT_UNIT = 16;
 const MAX_INDENT_LEVEL = 4;
@@ -20,33 +20,61 @@ interface CommentCardProps {
 const CommentCard = ({ comment: initialComment, indentationLevel }: CommentCardProps) => {
   const { theme } = useTheme();
   const router = useRouter();
-  const [comment, setComment] = useState(initialComment);
+  const {
+    counts,
+    userReactions,
+    userReposts,
+    initializePost,
+    toggleReaction,
+    toggleRepost
+  } = useRealtime();
+
+  // Initialize comment state in context
+  useEffect(() => {
+    initializePost(initialComment.id, {
+      likes: initialComment.likeCount,
+      dislikes: initialComment.dislikeCount,
+      laughs: initialComment.laughCount,
+      reposts: initialComment.repostCount,
+      comments: initialComment.commentCount,
+      userReaction: initialComment.userReaction,
+      isReposted: initialComment.isReposted || false,
+      isBookmarked: initialComment.isBookmarked || false,
+    });
+  }, [initialComment.id]);
+
+  const reaction = userReactions[initialComment.id] || initialComment.userReaction;
+  const isReposted = userReposts[initialComment.id] ?? initialComment.isReposted;
+  const currentCounts = counts[initialComment.id] || {
+    likes: initialComment.likeCount,
+    dislikes: initialComment.dislikeCount,
+    laughs: initialComment.laughCount,
+    reposts: initialComment.repostCount,
+    comments: initialComment.commentCount,
+  };
 
   const handleReaction = async (action: ReactionAction) => {
-    const prevReaction = comment.userReaction;
-    const nextReaction = prevReaction === action ? 'NONE' : action;
-
-    setComment(prev => ({ ...prev, userReaction: nextReaction }));
-
     try {
-      await api.react(comment.id, nextReaction);
+      await toggleReaction(initialComment.id, action);
     } catch (error) {
       console.error(`Failed to ${action} comment`, error);
-      setComment(prev => ({ ...prev, userReaction: prevReaction }));
     }
   };
 
   const handleCommentPress = () => {
-    router.push({ pathname: '/(compose)/compose', params: { replyToId: comment.id, authorUsername: comment.author.username } });
+    router.push({ pathname: '/(compose)/compose', params: { replyToId: initialComment.id, authorUsername: initialComment.author.username } });
   };
 
-  const handleRepost = () => {
-    // Per spec, this should open a repost modal
-    console.log('Repost comment');
+  const handleRepost = async () => {
+    try {
+      await toggleRepost(initialComment.id);
+    } catch (error) {
+      console.error('Failed to repost comment', error);
+    }
   };
 
   const goToProfile = () => {
-    router.push(`/(profile)/${comment.author.username}`);
+    router.push(`/(profile)/${initialComment.author.username}`);
   };
 
 
@@ -56,7 +84,7 @@ const CommentCard = ({ comment: initialComment, indentationLevel }: CommentCardP
   };
 
   const goToPost = () => {
-    router.push(`/post/${comment.id}`);
+    router.push(`/post/${initialComment.id}`);
   };
 
   return (
@@ -65,40 +93,35 @@ const CommentCard = ({ comment: initialComment, indentationLevel }: CommentCardP
         <View style={[styles.threadLine, { left: clampedIndentation * INDENT_UNIT + 20, backgroundColor: theme.border }]} />
       )}
       <TouchableOpacity onPress={goToProfile} activeOpacity={0.7}>
-        <Image source={{ uri: comment.author.avatar }} style={styles.avatar} />
+        <Image source={{ uri: initialComment.author.avatar }} style={styles.avatar} />
       </TouchableOpacity>
       <View style={styles.contentContainer}>
         <View style={styles.authorContainer}>
           <TouchableOpacity onPress={goToProfile} activeOpacity={0.7} style={styles.authorInfo}>
-            <Text style={[styles.authorName, { color: theme.textPrimary }]}>{comment.author.name}</Text>
-            <Text style={[styles.authorUsername, { color: theme.textTertiary }]}>@{comment.author.username}</Text>
+            <Text style={[styles.authorName, { color: theme.textPrimary }]}>{initialComment.author.name}</Text>
+            <Text style={[styles.authorUsername, { color: theme.textTertiary }]}>@{initialComment.author.username}</Text>
           </TouchableOpacity>
-          <Text style={[styles.timestamp, { color: theme.textTertiary }]}>{timeAgo(comment.createdAt)}</Text>
+          <Text style={[styles.timestamp, { color: theme.textTertiary }]}>{timeAgo(initialComment.createdAt)}</Text>
         </View>
         <TouchableOpacity onPress={goToPost} activeOpacity={0.9}>
-          <Text style={[styles.content, { color: theme.textPrimary }]}>{comment.content}</Text>
+          <Text style={[styles.content, { color: theme.textPrimary }]}>{initialComment.content}</Text>
         </TouchableOpacity>
-        {comment.media && comment.media.length > 0 && (
-          <MediaGrid media={comment.media} onPress={goToPost} />
+        {initialComment.media && initialComment.media.length > 0 && (
+          <MediaGrid media={initialComment.media} onPress={goToPost} />
         )}
         <ReactionBar
-          postId={comment.id}
+          postId={initialComment.id}
           onComment={handleCommentPress}
           onRepost={handleRepost}
           onReaction={handleReaction}
-          reaction={comment.userReaction}
-          initialCounts={{
-            likes: comment.likeCount,
-            dislikes: comment.dislikeCount,
-            laughs: comment.laughCount,
-            reposts: comment.repostCount,
-            comments: comment.commentCount,
-          }}
+          reaction={reaction}
+          isReposted={isReposted}
+          initialCounts={currentCounts}
         />
-        {comment.commentCount > 0 && (
+        {currentCounts.comments > 0 && (
           <TouchableOpacity onPress={goToPost} style={styles.viewRepliesContainer}>
             <Text style={[styles.viewRepliesText, { color: theme.link }]}>
-              View {comment.commentCount} {comment.commentCount === 1 ? 'reply' : 'replies'}
+              View {currentCounts.comments} {currentCounts.comments === 1 ? 'reply' : 'replies'}
             </Text>
           </TouchableOpacity>
         )}

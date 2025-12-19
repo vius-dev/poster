@@ -6,7 +6,11 @@ import { Post } from '@/types/post';
 import PostCard from '@/components/PostCard';
 import { useTheme } from '@/theme/theme';
 
-const ForYouFeed = () => {
+interface ForYouFeedProps {
+  header?: React.ReactElement;
+}
+
+const ForYouFeed = ({ header }: ForYouFeedProps) => {
   const { theme } = useTheme();
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
@@ -19,7 +23,7 @@ const ForYouFeed = () => {
   const loadInitialPosts = async () => {
     setLoading(true);
     try {
-      const initialPosts = await api.getForYouFeed(); 
+      const initialPosts = await api.getForYouFeed();
       setPosts(initialPosts);
     } catch (error) {
       console.error('Error loading for you feed:', error);
@@ -32,7 +36,7 @@ const ForYouFeed = () => {
     if (loadingMore || loading) return;
     setLoadingMore(true);
     try {
-      const morePosts = await api.getForYouFeed(posts.length); 
+      const morePosts = await api.getForYouFeed(posts.length);
       setPosts(prevPosts => [...prevPosts, ...morePosts]);
     } catch (error) {
       console.error('Error loading more posts:', error);
@@ -41,12 +45,6 @@ const ForYouFeed = () => {
     }
   };
 
-  if (loading) {
-    return (
-      <View style={styles.centered}><ActivityIndicator color={theme.primary} /></View>
-    );
-  }
-
   return (
     <FlatList
       data={posts}
@@ -54,9 +52,16 @@ const ForYouFeed = () => {
       keyExtractor={(item, index) => `${item.id}-${index}`}
       onEndReached={loadMorePosts}
       onEndReachedThreshold={0.5}
-      ListFooterComponent={loadingMore ? <ActivityIndicator style={{ marginVertical: 20 }} color={theme.primary} /> : null}
+      ListHeaderComponent={header}
+      ListFooterComponent={
+        loadingMore ? (
+          <ActivityIndicator style={{ marginVertical: 20 }} color={theme.primary} />
+        ) : loading && posts.length === 0 ? (
+          <View style={styles.centered}><ActivityIndicator color={theme.primary} /></View>
+        ) : null
+      }
       onRefresh={loadInitialPosts}
-      refreshing={loading}
+      refreshing={loading && posts.length > 0}
     />
   );
 };

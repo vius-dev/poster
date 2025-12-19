@@ -17,6 +17,15 @@ export default function ExploreScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<{ posts: Post[], users: User[] }>({ posts: [], users: [] });
   const [isSearching, setIsSearching] = useState(false);
+  const [trends, setTrends] = useState<{ hashtag: string, count: number }[]>([]);
+
+  React.useEffect(() => {
+    const fetchTrends = async () => {
+      const trendingData = await api.getTrends();
+      setTrends(trendingData);
+    };
+    fetchTrends();
+  }, []);
 
   const handleSearch = async (query: string) => {
     setSearchQuery(query);
@@ -28,6 +37,28 @@ export default function ExploreScreen() {
       setIsSearching(false);
     }
   };
+
+  const renderTrendItem = ({ item, index }: { item: { hashtag: string, count: number }, index: number }) => (
+    <TouchableOpacity
+      style={[styles.trendItem, { borderBottomColor: theme.borderLight }]}
+      onPress={() => handleSearch(item.hashtag)}
+    >
+      <View style={styles.trendInfo}>
+        <Text style={[styles.trendCategory, { color: theme.textTertiary }]}>
+          {index + 1} · Trending
+        </Text>
+        <Text style={[styles.trendHashtag, { color: theme.textPrimary }]}>
+          #{item.hashtag}
+        </Text>
+        <Text style={[styles.trendCount, { color: theme.textTertiary }]}>
+          {item.count} posts
+        </Text>
+      </View>
+      <TouchableOpacity style={styles.trendMore}>
+        <Ionicons name="ellipsis-horizontal" size={16} color={theme.textTertiary} />
+      </TouchableOpacity>
+    </TouchableOpacity>
+  );
 
   const renderSearchResult = () => {
     if (searchResults.users.length === 0 && searchResults.posts.length === 0) {
@@ -98,7 +129,27 @@ export default function ExploreScreen() {
       {isSearching ? (
         renderSearchResult()
       ) : (
-        <ForYouFeed />
+        <ForYouFeed
+          header={
+            <>
+              <View style={styles.trendsSection}>
+                <Text style={[styles.trendsTitle, { color: theme.textPrimary }]}>Trends for you</Text>
+                {trends.map((item, index) => (
+                  <View key={item.hashtag}>
+                    {renderTrendItem({ item, index })}
+                  </View>
+                ))}
+                <TouchableOpacity style={styles.showMoreTrends}>
+                  <Text style={{ color: theme.primary, fontSize: 15 }}>Show more</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={[styles.divider, { backgroundColor: theme.surface }]} />
+              <View style={styles.feedSection}>
+                <Text style={[styles.sectionTitle, { color: theme.textPrimary, paddingVertical: 15 }]}>What's happening</Text>
+              </View>
+            </>
+          }
+        />
       )}
     </SafeAreaView>
   );
@@ -144,10 +195,52 @@ const styles = StyleSheet.create({
     borderBottomColor: '#ddd',
   },
   sectionTitle: {
-    fontSize: 20, // Larger section title
+    fontSize: 20,
     fontWeight: 'bold',
     paddingHorizontal: 15,
-    marginBottom: 12,
+  },
+  trendsSection: {
+    paddingVertical: 10,
+  },
+  trendsTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+  },
+  trendItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+  },
+  trendInfo: {
+    flex: 1,
+  },
+  trendCategory: {
+    fontSize: 13,
+    marginBottom: 2,
+  },
+  trendHashtag: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 2,
+  },
+  trendCount: {
+    fontSize: 13,
+  },
+  trendMore: {
+    padding: 5,
+  },
+  showMoreTrends: {
+    padding: 15,
+  },
+  divider: {
+    height: 8,
+  },
+  feedSection: {
+    paddingBottom: 20,
   },
   userItem: {
     flexDirection: 'row',

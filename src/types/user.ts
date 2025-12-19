@@ -15,4 +15,7 @@ export type User = {
     is_muted: boolean;
 };
 
-export type UserProfile = User;
+export type UserProfile = User & {
+    followers_count: number;
+    following_count: number;
+};

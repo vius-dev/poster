@@ -36,24 +36,15 @@ export default function ReactionBar({
   isReposted,
   hideCounts = false
 }: ReactionBarProps) {
-  const { counts, initializeCounts } = useRealtime();
+  const { counts } = useRealtime();
   const { theme } = useTheme();
-
-  useEffect(() => {
-    initializeCounts(postId, {
-      likes: initialCounts.likes,
-      dislikes: initialCounts.dislikes,
-      laughs: initialCounts.laughs,
-      reposts: initialCounts.reposts,
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [postId]);
 
   const currentCounts = counts[postId] || {
     likes: initialCounts.likes,
     dislikes: initialCounts.dislikes,
     laughs: initialCounts.laughs,
     reposts: initialCounts.reposts,
+    comments: initialCounts.comments,
   };
 
   const iconColor = theme.textTertiary;
@@ -63,7 +54,7 @@ export default function ReactionBar({
     <View style={styles.container}>
       <TouchableOpacity onPress={onComment} style={styles.button}>
         <Ionicons name="chatbubble-outline" size={20} color={iconColor} />
-        {!hideCounts && <Text style={[styles.count, { color: iconColor }]}>{initialCounts.comments}</Text>}
+        {!hideCounts && <Text style={[styles.count, { color: iconColor }]}>{currentCounts.comments}</Text>}
       </TouchableOpacity>
       <TouchableOpacity onPress={onRepost} style={styles.button}>
         <Ionicons name={isReposted ? "repeat" : "repeat-outline"} size={20} color={repostColor} />

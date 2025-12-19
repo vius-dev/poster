@@ -13,12 +13,6 @@
 
 We’re designing a **public square**, not a SaaS.
 
----
-
-# ✅ CORRECTED PHASE-8 SCOPE
-
-**(Pre-2023 Twitter Accurate)**
-
 > **Trust, Safety, and Platform Integrity**
 
 This is the **last required phase** before scale.

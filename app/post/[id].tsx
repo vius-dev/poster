@@ -30,7 +30,7 @@ const PostDetailScreen = () => {
           const parents = res.parents.map((p: Post) => ({ ...p, itemType: 'parent' as const }));
           const focalPost: ListItem = { ...res.post, itemType: 'focal' };
 
-          // Only show direct replies (non-recursive) to hide deeper threads
+          // Only show direct replies (non-recursive) to hide deeper threads 
           const replies = (res.post.comments || []).map(comment => ({
             ...comment,
             depth: 0,

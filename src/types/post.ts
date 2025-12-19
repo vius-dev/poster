@@ -25,6 +25,8 @@ export type Comment = {
   comments?: Comment[]; // Unified field name
   media?: Media[];
   parentPostId?: string;
+  isReposted?: boolean;
+  isBookmarked?: boolean;
 };
 
 export type Post = {
@@ -45,6 +47,7 @@ export type Post = {
   comments?: Comment[];
   media?: Media[];
   parentPostId?: string;
+  isBookmarked?: boolean;
 };
 
 export type ReportReason = 'SPAM' | 'HARASSMENT' | 'HATE_SPEECH' | 'MISINFORMATION' | 'OTHER';

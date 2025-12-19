@@ -1,11 +1,11 @@
-
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity, Pressable, Alert } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, Modal, TouchableOpacity, Pressable, Alert, Share } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Post } from '@/types/post';
 import { api } from '@/lib/api';
 import ReportModal from './modals/ReportModal';
 import { ReportType } from '@/types/reports';
+import { useTheme } from '@/theme/theme';
 
 interface PostMenuProps {
   visible: boolean;
@@ -14,29 +14,83 @@ interface PostMenuProps {
 }
 
 export default function PostMenu({ visible, onClose, post }: PostMenuProps) {
+  const { theme } = useTheme();
   const [isReportModalVisible, setReportModalVisible] = useState(false);
+  const [isBookmarked, setIsBookmarked] = useState(false);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isBlocked, setIsBlocked] = useState(false);
 
-  const handleBookmark = () => {
-    console.log(`Bookmarking post ${post.id}`);
-    onClose();
+  useEffect(() => {
+    if (visible) {
+      const checkStatus = async () => {
+        const bookmarked = await api.isBookmarked(post.id);
+        const rel = await api.fetchUserRelationship(post.author.id);
+        setIsBookmarked(bookmarked);
+        setIsFollowing(rel.type === 'FOLLOWING');
+        setIsMuted(rel.type === 'MUTED');
+        setIsBlocked(rel.type === 'BLOCKED');
+      };
+      checkStatus();
+    }
+  }, [visible, post.id, post.author.id]);
+
+  const handleBookmark = async () => {
+    try {
+      const status = await api.toggleBookmark(post.id);
+      setIsBookmarked(status);
+      Alert.alert(status ? 'Added to Bookmarks' : 'Removed from Bookmarks');
+    } catch (error) {
+      Alert.alert('Error', 'Could not update bookmark.');
+    } finally {
+      onClose();
+    }
   };
 
-  const handleShare = () => {
-    console.log(`Sharing post ${post.id}`);
-    onClose();
+  const handleShare = async () => {
+    try {
+      await Share.share({
+        message: `${post.author.name} (@${post.author.username}): ${post.content}\n\nShared from Postr`,
+        url: `https://postr.dev/post/${post.id}`, // Mock URL
+      });
+    } catch (error) {
+      console.error('Error sharing post', error);
+    } finally {
+      onClose();
+    }
   };
 
-  const handleFollow = () => {
-    console.log(`Following author ${post.author.name}`);
-    onClose();
+  const handleFollow = async () => {
+    try {
+      if (isFollowing) {
+        await api.unfollowUser(post.author.id);
+        setIsFollowing(false);
+        Alert.alert('Unfollowed', `You unfollowed @${post.author.username}`);
+      } else {
+        await api.followUser(post.author.id);
+        setIsFollowing(true);
+        Alert.alert('Followed', `You are now following @${post.author.username}`);
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Could not update follow status.');
+    } finally {
+      onClose();
+    }
   };
 
   const handleMute = async () => {
     try {
-      await api.muteUser(post.author.id);
-      Alert.alert('User Muted', `@${post.author.username} has been muted.`)
+      if (isMuted) {
+        await api.unmuteUser(post.author.id);
+        setIsMuted(false);
+        Alert.alert('User Unmuted', `@${post.author.username} has been unmuted.`);
+      } else {
+        await api.muteUser(post.author.id);
+        setIsMuted(true);
+        Alert.alert('User Muted', `@${post.author.username} has been muted.`);
+      }
     } catch (error) {
-      Alert.alert('Error', 'Could not mute user. Please try again.');
+      Alert.alert('Error', 'Action failed. Please try again.');
     } finally {
       onClose();
     }
@@ -44,10 +98,17 @@ export default function PostMenu({ visible, onClose, post }: PostMenuProps) {
 
   const handleBlock = async () => {
     try {
-      await api.blockUser(post.author.id);
-      Alert.alert('User Blocked', `@${post.author.username} has been blocked.`)
+      if (isBlocked) {
+        await api.unblockUser(post.author.id);
+        setIsBlocked(false);
+        Alert.alert('User Unblocked', `@${post.author.username} has been unblocked.`);
+      } else {
+        await api.blockUser(post.author.id);
+        setIsBlocked(true);
+        Alert.alert('User Blocked', `@${post.author.username} has been blocked.`);
+      }
     } catch (error) {
-      Alert.alert('Error', 'Could not block user. Please try again.');
+      Alert.alert('Error', 'Action failed. Please try again.');
     } finally {
       onClose();
     }
@@ -78,32 +139,61 @@ export default function PostMenu({ visible, onClose, post }: PostMenuProps) {
         onRequestClose={onClose}
       >
         <Pressable style={styles.overlay} onPress={onClose}>
-          <View style={styles.container}>
+          <View style={[styles.container, { backgroundColor: theme.background }]}>
+            <View style={[styles.dragHandle, { backgroundColor: theme.border }]} />
+
             <TouchableOpacity style={styles.option} onPress={handleBookmark}>
-              <Ionicons name="bookmark-outline" size={24} color="#333" />
-              <Text style={styles.optionText}>Bookmark</Text>
+              <Ionicons
+                name={isBookmarked ? "bookmark" : "bookmark-outline"}
+                size={22}
+                color={isBookmarked ? theme.primary : theme.textPrimary}
+              />
+              <Text style={[styles.optionText, { color: theme.textPrimary }]}>
+                {isBookmarked ? 'Remove from Bookmarks' : 'Bookmark'}
+              </Text>
             </TouchableOpacity>
+
             <TouchableOpacity style={styles.option} onPress={handleShare}>
-              <Ionicons name="share-outline" size={24} color="#333" />
-              <Text style={styles.optionText}>Share</Text>
+              <Ionicons name="share-outline" size={22} color={theme.textPrimary} />
+              <Text style={[styles.optionText, { color: theme.textPrimary }]}>Share Post</Text>
             </TouchableOpacity>
+
             <TouchableOpacity style={styles.option} onPress={handleFollow}>
-              <Ionicons name="person-add-outline" size={24} color="#333" />
-              <Text style={styles.optionText}>Follow {post.author.name}</Text>
+              <Ionicons
+                name={isFollowing ? "person-remove-outline" : "person-add-outline"}
+                size={22}
+                color={theme.textPrimary}
+              />
+              <Text style={[styles.optionText, { color: theme.textPrimary }]}>
+                {isFollowing ? `Unfollow @${post.author.username}` : `Follow @${post.author.username}`}
+              </Text>
             </TouchableOpacity>
-            <View style={styles.divider} />
+
+            <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
             <TouchableOpacity style={styles.option} onPress={handleMute}>
-              <Ionicons name="volume-mute-outline" size={24} color="#333" />
-              <Text style={styles.optionText}>Mute @{post.author.username}</Text>
+              <Ionicons
+                name={isMuted ? "volume-high-outline" : "volume-mute-outline"}
+                size={22}
+                color={theme.textPrimary}
+              />
+              <Text style={[styles.optionText, { color: theme.textPrimary }]}>
+                {isMuted ? `Unmute @${post.author.username}` : `Mute @${post.author.username}`}
+              </Text>
             </TouchableOpacity>
+
             <TouchableOpacity style={styles.option} onPress={handleBlock}>
-              <Ionicons name="ban-outline" size={24} color="#d9534f" />
-              <Text style={[styles.optionText, styles.destructiveText]}>Block @{post.author.username}</Text>
+              <Ionicons name="ban-outline" size={22} color={theme.error} />
+              <Text style={[styles.optionText, { color: theme.error }]}>
+                {isBlocked ? `Unblock @${post.author.username}` : `Block @${post.author.username}`}
+              </Text>
             </TouchableOpacity>
-            <View style={styles.divider} />
+
+            <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
             <TouchableOpacity style={styles.option} onPress={openReportModal}>
-              <Ionicons name="flag-outline" size={24} color="#f0ad4e" />
-              <Text style={[styles.optionText, styles.warningText]}>Report Post</Text>
+              <Ionicons name="flag-outline" size={22} color={theme.error} />
+              <Text style={[styles.optionText, { color: theme.error }]}>Report Post</Text>
             </TouchableOpacity>
           </View>
         </Pressable>
@@ -124,30 +214,31 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   container: {
-    backgroundColor: 'white',
-    paddingVertical: 10,
-    borderTopLeftRadius: 15,
-    borderTopRightRadius: 15,
+    paddingBottom: 40,
+    paddingTop: 8,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+  dragHandle: {
+    width: 40,
+    height: 5,
+    borderRadius: 2.5,
+    alignSelf: 'center',
+    marginBottom: 10,
   },
   option: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 15,
+    paddingVertical: 14,
     paddingHorizontal: 20,
   },
   optionText: {
-    fontSize: 18,
+    fontSize: 17,
     marginLeft: 15,
+    fontWeight: '500',
   },
   divider: {
     height: 1,
-    backgroundColor: '#eee',
-    marginVertical: 10,
-  },
-  destructiveText: {
-    color: '#d9534f',
-  },
-  warningText: {
-    color: '#f0ad4e',
+    marginVertical: 8,
   },
 });

@@ -24,9 +24,9 @@ const mockPosts: Post[] = [
     createdAt: '1h',
     author: {
       id: '0',
-      name: 'Current User',
-      username: 'currentuser',
-      avatar: 'https://i.pravatar.cc/150?u=0',
+      name: 'Dev Team',
+      username: 'devteam',
+      avatar: 'https://i.pravatar.cc/150?u=devteam',
     },
     likeCount: 0,
     dislikeCount: 0,
@@ -42,9 +42,9 @@ const mockPosts: Post[] = [
     createdAt: '2h',
     author: {
       id: '0',
-      name: 'Current User',
-      username: 'currentuser',
-      avatar: 'https://i.pravatar.cc/150?u=0',
+      name: 'Dev Team',
+      username: 'devteam',
+      avatar: 'https://i.pravatar.cc/150?u=devteam',
     },
     likeCount: 0,
     dislikeCount: 0,
@@ -68,6 +68,7 @@ export default function UserProfileScreen() {
   const [replies, setReplies] = useState<Post[]>([]);
   const [media, setMedia] = useState<Post[]>([]);
   const [reactions, setReactions] = useState<Post[]>([]);
+  const [bookmarks, setBookmarks] = useState<Post[]>([]);
   const { theme } = useTheme();
   const router = useRouter();
   const { username: paramUsername } = useLocalSearchParams();
@@ -76,7 +77,7 @@ export default function UserProfileScreen() {
     const fetchUser = async () => {
       setLoading(true);
       try {
-        const usernameToFetch = (paramUsername as string) || 'currentuser';
+        const usernameToFetch = (paramUsername as string) || 'devteam';
         const fetchedUser = await api.fetchUser(usernameToFetch);
         if (fetchedUser) {
           setUser(fetchedUser);
@@ -148,6 +149,16 @@ export default function UserProfileScreen() {
           setReactions(data);
         } catch (error) {
           console.error("Failed to fetch reactions", error);
+        } finally {
+          setIsListLoading(false);
+        }
+      } else if (selectedTab === 'Bookmark' && bookmarks.length === 0) {
+        setIsListLoading(true);
+        try {
+          const data = await api.getBookmarks();
+          setBookmarks(data);
+        } catch (error) {
+          console.error("Failed to fetch bookmarks", error);
         } finally {
           setIsListLoading(false);
         }
@@ -260,6 +271,7 @@ export default function UserProfileScreen() {
       />}
       <ProfileTabs
         selectedTab={selectedTab}
+        isOwner={user?.id === '0'}
         onSelectTab={(tab) => {
           if (tab === 'Shop') {
             router.push('/(tabs)/shop');
@@ -304,6 +316,7 @@ export default function UserProfileScreen() {
       case 'Replies': return replies;
       case 'Media': return media;
       case 'Dis/Likes': return reactions;
+      case 'Bookmark': return bookmarks;
       case 'Posts': return posts;
       case 'Shop': return [{ id: 'shop-placeholder', type: 'placeholder' }];
       default: return [];

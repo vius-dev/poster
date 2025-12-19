@@ -1,5 +1,5 @@
 
-export type ReportableEntityType = 'POST' | 'USER' | 'MEDIA';
+export type ReportableEntityType = 'POST' | 'USER' | 'MEDIA' | 'COMMENT' | 'MESSAGE';
 
 export type ReportType =
   | 'SPAM'

@@ -19,8 +19,8 @@ export default function CreateGroupScreen() {
     // In a real app, you'd fetch a list of users you can add to a group.
     // For this example, we'll use the mock users from the api.
     const fetchUsers = async () => {
-        const allUsers = await api.getFollowing('0'); // just a way to get some users
-        setUsers(allUsers.filter(u => u.id !== '0')); // Exclude current user
+      const allUsers = await api.getFollowing('0'); // just a way to get some users
+      setUsers(allUsers.filter(u => u.id !== '0')); // Exclude Dev Team
     };
     fetchUsers();
   }, []);
@@ -51,8 +51,8 @@ export default function CreateGroupScreen() {
       <TouchableOpacity style={styles.userRow} onPress={() => toggleUserSelection(item.id)}>
         <Image source={{ uri: item.avatar }} style={styles.avatar} />
         <View style={styles.userInfo}>
-            <Text style={{color: theme.textPrimary}}>{item.name}</Text>
-            <Text style={{color: theme.textTertiary}}>@{item.username}</Text>
+          <Text style={{ color: theme.textPrimary }}>{item.name}</Text>
+          <Text style={{ color: theme.textTertiary }}>@{item.username}</Text>
         </View>
         <Ionicons
           name={isSelected ? 'checkmark-circle' : 'ellipse-outline'}
@@ -70,8 +70,8 @@ export default function CreateGroupScreen() {
           <Ionicons name="close" size={28} color={theme.textPrimary} />
         </TouchableOpacity>
         <Text style={[styles.title, { color: theme.textPrimary }]}>New Group</Text>
-        <TouchableOpacity onPress={handleCreateGroup} style={[styles.createButton, {backgroundColor: theme.primary}]}>
-            <Text style={styles.createButtonText}>Create</Text>
+        <TouchableOpacity onPress={handleCreateGroup} style={[styles.createButton, { backgroundColor: theme.primary }]}>
+          <Text style={styles.createButtonText}>Create</Text>
         </TouchableOpacity>
       </View>
       <View style={styles.inputContainer}>
@@ -94,52 +94,52 @@ export default function CreateGroupScreen() {
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-    },
-    header: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: 15,
-    },
-    title: {
-        fontSize: 18,
-        fontWeight: 'bold',
-    },
-    createButton: {
-        paddingHorizontal: 15,
-        paddingVertical: 8,
-        borderRadius: 20,
-    },
-    createButtonText: {
-        color: 'white',
-        fontWeight: 'bold',
-    },
-    inputContainer: {
-        paddingHorizontal: 15,
-        paddingVertical: 10,
-    },
-    input: {
-        height: 40,
-        borderRadius: 20,
-        paddingHorizontal: 15,
-        fontSize: 16,
-    },
-    userRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        padding: 15,
-        borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: '#2f3336',
-    },
-    avatar: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        marginRight: 15,
-    },
-    userInfo: {
-        flex: 1,
-    },
+  container: {
+    flex: 1,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 15,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  createButton: {
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  createButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  inputContainer: {
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+  },
+  input: {
+    height: 40,
+    borderRadius: 20,
+    paddingHorizontal: 15,
+    fontSize: 16,
+  },
+  userRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 15,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#2f3336',
+  },
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 15,
+  },
+  userInfo: {
+    flex: 1,
+  },
 });

@@ -6,11 +6,11 @@ import Button from '@/components/Button';
 import { useTheme } from '@/theme/theme';
 
 export type ViewerRelationship =
-  | { type: 'SELF' }
-  | { type: 'NOT_FOLLOWING' }
-  | { type: 'FOLLOWING' }
-  | { type: 'MUTED' }
-  | { type: 'BLOCKED' };
+  | { type: 'SELF'; targetUserId: string }
+  | { type: 'NOT_FOLLOWING'; targetUserId: string }
+  | { type: 'FOLLOWING'; targetUserId: string }
+  | { type: 'MUTED'; targetUserId: string }
+  | { type: 'BLOCKED'; targetUserId: string };
 
 interface ProfileActionRowProps {
   relationship: ViewerRelationship;

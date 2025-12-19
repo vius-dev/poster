@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -25,55 +25,61 @@ interface PostCardProps {
 export default function PostCard({ post, isFocal = false }: PostCardProps) {
   const router = useRouter();
   const { theme } = useTheme();
-  const { counts, setCounts } = useRealtime();
+  const {
+    counts,
+    userReactions,
+    userReposts,
+    initializePost,
+    toggleReaction,
+    toggleRepost
+  } = useRealtime();
 
-  const [reaction, setReaction] = useState(post.userReaction);
-  const [isReposted, setIsReposted] = useState(post.isReposted);
   const [isRepostModalVisible, setRepostModalVisible] = useState(false);
   const [isMenuVisible, setMenuVisible] = useState(false);
 
-  const currentCounts = useMemo(() => counts[post.id] || {
+  // Initialize post state in context
+  useEffect(() => {
+    initializePost(post.id, {
+      likes: post.likeCount,
+      dislikes: post.dislikeCount,
+      laughs: post.laughCount,
+      reposts: post.repostCount,
+      comments: post.commentCount,
+      userReaction: post.userReaction,
+      isReposted: post.isReposted || false,
+      isBookmarked: post.isBookmarked || false,
+    });
+  }, [post.id]);
+
+  const reaction = userReactions[post.id] || post.userReaction;
+  const isReposted = userReposts[post.id] ?? post.isReposted;
+
+  const currentCounts = counts[post.id] || {
     likes: post.likeCount,
     dislikes: post.dislikeCount,
     laughs: post.laughCount,
     reposts: post.repostCount,
-  }, [counts, post.id, post.likeCount, post.dislikeCount, post.laughCount, post.repostCount]);
+    comments: post.commentCount,
+  };
 
   const handleComment = () => {
     router.push({ pathname: '/(compose)/compose', params: { replyToId: post.id, authorUsername: post.author.username } });
   };
 
   const handleReaction = async (action: ReactionAction) => {
-    const prevReaction = reaction;
-    const nextReaction = prevReaction === action ? 'NONE' : action;
-
-    setReaction(nextReaction);
-
-    let deltas: { [key: string]: number } = { likes: 0, dislikes: 0, laughs: 0 };
-    if (prevReaction !== 'NONE') deltas[prevReaction.toLowerCase() + 's'] = -1;
-    if (nextReaction !== 'NONE') deltas[nextReaction.toLowerCase() + 's'] = 1;
-
-    setCounts(post.id, { ...currentCounts, ...Object.fromEntries(Object.entries(deltas).map(([k, v]) => [k, currentCounts[k as keyof typeof currentCounts] + v])) });
-
     try {
-      await api.react(post.id, nextReaction);
+      await toggleReaction(post.id, action);
     } catch (error) {
-      setReaction(prevReaction);
-      setCounts(post.id, currentCounts);
+      console.error('Failed to react', error);
     }
   };
 
   const handleRepost = async () => {
-    const nextReposted = !isReposted;
-    setIsReposted(nextReposted);
-    setCounts(post.id, { ...currentCounts, reposts: currentCounts.reposts + (nextReposted ? 1 : -1) });
     setRepostModalVisible(false);
-
     try {
-      await api.repost(post.id);
+      await toggleRepost(post.id);
     } catch (error) {
-      setIsReposted(!nextReposted);
-      setCounts(post.id, currentCounts);
+      console.error('Failed to repost', error);
     }
   };
 
@@ -149,8 +155,20 @@ export default function PostCard({ post, isFocal = false }: PostCardProps) {
                     <Text style={[styles.statLabel, { color: theme.textTertiary }]}> Likes</Text>
                   </View>
                   <View style={styles.statItem}>
+                    <Text style={[styles.statNumber, { color: theme.textPrimary }]}>{currentCounts.dislikes}</Text>
+                    <Text style={[styles.statLabel, { color: theme.textTertiary }]}> Dislikes</Text>
+                  </View>
+                  <View style={styles.statItem}>
+                    <Text style={[styles.statNumber, { color: theme.textPrimary }]}>{currentCounts.laughs}</Text>
+                    <Text style={[styles.statLabel, { color: theme.textTertiary }]}> Laughs</Text>
+                  </View>
+                  <View style={styles.statItem}>
                     <Text style={[styles.statNumber, { color: theme.textPrimary }]}>{currentCounts.reposts}</Text>
                     <Text style={[styles.statLabel, { color: theme.textTertiary }]}> Reposts</Text>
+                  </View>
+                  <View style={styles.statItem}>
+                    <Text style={[styles.statNumber, { color: theme.textPrimary }]}>{currentCounts.comments}</Text>
+                    <Text style={[styles.statLabel, { color: theme.textTertiary }]}> Comments</Text>
                   </View>
                 </View>
               </View>
@@ -162,10 +180,7 @@ export default function PostCard({ post, isFocal = false }: PostCardProps) {
               onReaction={handleReaction}
               reaction={reaction}
               isReposted={isReposted}
-              initialCounts={{
-                ...currentCounts,
-                comments: post.commentCount,
-              }}
+              initialCounts={currentCounts}
               hideCounts={isFocal}
             />
           </Card.Actions>
@@ -263,7 +278,7 @@ const styles = StyleSheet.create({
   },
   statItem: {
     flexDirection: 'row',
-    marginRight: 20,
+    marginRight: 12,
   },
   statNumber: {
     fontWeight: 'bold',
