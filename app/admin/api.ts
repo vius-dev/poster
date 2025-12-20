@@ -10,9 +10,9 @@ let mockUsers: User[] = [
   { id: 'user-789', name: 'Charlie', username: 'charlie', avatar: 'https://i.pravatar.cc/150?u=charlie', is_active: false, is_limited: true, is_shadow_banned: false, is_suspended: true, is_muted: false },
 ];
 
-const alice: Author = { id: 'user-123', name: 'Alice', username: 'alice', avatar: 'https://i.pravatar.cc/150?u=alice' };
-const bob: Author = { id: 'user-456', name: 'Bob', username: 'bob', avatar: 'https://i.pravatar.cc/150?u=bob' };
-const charlie: Author = { id: 'user-789', name: 'Charlie', username: 'charlie', avatar: 'https://i.pravatar.cc/150?u=charlie' };
+const alice: Author = { id: 'user-123', name: 'Alice', username: 'alice', avatar: 'https://i.pravatar.cc/150?u=alice', is_suspended: false, is_shadow_banned: false, is_limited: false };
+const bob: Author = { id: 'user-456', name: 'Bob', username: 'bob', avatar: 'https://i.pravatar.cc/150?u=bob', is_suspended: false, is_shadow_banned: false, is_limited: false };
+const charlie: Author = { id: 'user-789', name: 'Charlie', username: 'charlie', avatar: 'https://i.pravatar.cc/150?u=charlie', is_suspended: true, is_shadow_banned: false, is_limited: true };
 
 const mockComments: Comment[] = [
   {

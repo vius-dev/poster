@@ -6,6 +6,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { api } from '@/lib/api';
 import PostCard from '@/components/PostCard';
 import CommentCard from '@/components/CommentCard';
+import PollResultsChart from '@/components/PollResultsChart';
 import { Post, Comment } from '@/types/post';
 import { useTheme } from '@/theme/theme';
 import { eventEmitter } from '@/lib/EventEmitter';
@@ -92,6 +93,7 @@ const PostDetailScreen = () => {
         return (
           <View style={{ backgroundColor: theme.card }}>
             <PostCard post={item} isFocal />
+            {item.poll && <PollResultsChart poll={item.poll} />}
           </View>
         );
       case 'reply':

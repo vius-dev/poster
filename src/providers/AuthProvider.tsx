@@ -21,11 +21,29 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const fetchUser = async () => {
       if (session) {
         setLoading(true);
-        const res = await api.fetchUser(session.user.id);
-        if (res) {
-          setUser(res);
+        try {
+          const userId = session.user.id;
+
+          // Determine if we should map to the Dev Team user
+          // For now, we'll map a specific dev email or just the '0' ID fallback
+          const isDevEmail = session.user.email?.toLowerCase().includes('devteam') ||
+            session.user.email?.toLowerCase().includes('handi');
+
+          const effectiveId = isDevEmail ? '0' : userId;
+
+          // Sync with API
+          api.setSessionUser(effectiveId);
+
+          // Attempt to fetch user
+          let res = await api.fetchUser(effectiveId);
+
+          setUser(res || null);
+        } catch (error) {
+          console.error('[AuthProvider] Failed to hydrate user:', error);
+          setUser(null);
+        } finally {
+          setLoading(false);
         }
-        setLoading(false);
       } else {
         setUser(null);
         setLoading(false);

@@ -6,22 +6,40 @@ import { useTheme } from '@/theme/theme';
 import { api } from '@/lib/api';
 import { Conversation, ConversationType } from '@/types/message';
 import ConversationItem from '@/components/ConversationItem';
-import { Ionicons } from '@expo/vector-icons';
+import ExploreSearchBar from '@/components/ExploreSearchBar';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import { CURRENT_USER_ID } from '@/lib/api';
+
 
 type FilterType = 'All' | 'DMs' | 'Groups' | 'Channels' | 'Unread';
+
+import { useMessagesSettings, useNotificationsSettings } from '@/state/communicationSettings';
 
 export default function MessagesScreen() {
   const { theme } = useTheme();
   const router = useRouter();
+  const { allowMessageRequests } = useMessagesSettings();
+  const { mutedWords } = useNotificationsSettings();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<FilterType>('All');
+  const [followingIds, setFollowingIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     loadConversations();
+    loadFollowing();
   }, []);
+
+  const loadFollowing = async () => {
+    try {
+      const following = await api.getFollowing();
+      setFollowingIds(new Set(following.map(u => u.id)));
+    } catch (error) {
+      console.error('Error loading following:', error);
+    }
+  };
 
   const loadConversations = async () => {
     setLoading(true);
@@ -37,12 +55,26 @@ export default function MessagesScreen() {
 
   const filteredConversations = useMemo(() => {
     return conversations.filter(conv => {
-      // Search logic
+      // 1. Message Requests Logic
+      if (conv.type === 'DM' && !allowMessageRequests) {
+        const otherParticipant = conv.participants.find(p => p.id !== CURRENT_USER_ID);
+        if (otherParticipant && !followingIds.has(otherParticipant.id)) {
+          return false;
+        }
+      }
+
+      // 2. Muted Words in Last Message
+      if (mutedWords.length > 0 && conv.lastMessage?.text) {
+        const lastMsg = conv.lastMessage.text.toLowerCase();
+        if (mutedWords.some(word => lastMsg.includes(word))) return false;
+      }
+
+      // 3. Search logic
       const query = searchQuery.toLowerCase();
       let matchesSearch = true;
       if (query) {
         if (conv.type === 'DM') {
-          const otherUser = conv.participants.find(p => p.id !== '0') || conv.participants[0];
+          const otherUser = conv.participants.find(p => p.id !== CURRENT_USER_ID) || conv.participants[0];
           matchesSearch = otherUser.name.toLowerCase().includes(query) ||
             otherUser.username.toLowerCase().includes(query);
         } else {
@@ -90,23 +122,18 @@ export default function MessagesScreen() {
       {/* Header */}
       <View style={styles.header}>
         <Text style={[styles.title, { color: theme.textPrimary }]}>Messages</Text>
-        <TouchableOpacity>
+        <TouchableOpacity onPress={() => router.push('/messages/settings')}>
           <Ionicons name="settings-outline" size={24} color={theme.primary} />
         </TouchableOpacity>
       </View>
 
       {/* Search Bar */}
       <View style={styles.searchContainer}>
-        <View style={[styles.searchBar, { backgroundColor: theme.surface }]}>
-          <Ionicons name="search" size={18} color={theme.textTertiary} style={styles.searchIcon} />
-          <TextInput
-            style={[styles.searchInput, { color: theme.textPrimary }]}
-            placeholder="Search Messages"
-            placeholderTextColor={theme.textTertiary}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-        </View>
+        <ExploreSearchBar
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          placeholder="Search Messages"
+        />
       </View>
 
       {/* Filter Chips */}
@@ -206,21 +233,6 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'transparent',
-  },
-  searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    height: 36,
-    borderRadius: 18,
-    paddingHorizontal: 12,
-  },
-  searchIcon: {
-    marginRight: 8,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 15,
-    height: '100%',
   },
   filtersContainer: {
     paddingVertical: 10,

@@ -120,7 +120,7 @@ export default function PostMenu({ visible, onClose, post }: PostMenuProps) {
 
   const handleReportSubmit = async (reportType: ReportType, reason?: string) => {
     try {
-      await api.createReport('POST', post.id, reportType, '0', reason);
+      await api.createReport('POST', post.id, reportType, '0', reason || '');
       Alert.alert('Post Reported', 'Thank you for your report. We will review it shortly.');
     } catch (error) {
       Alert.alert('Error', 'Could not report post. Please try again.');

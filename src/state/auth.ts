@@ -36,12 +36,36 @@ export const useAuthStore = create<AuthState>((set) => ({
     console.log('Auth store initialize called');
     const { data: { session } } = await supabase.auth.getSession();
     console.log('Initialize got session:', session);
-    set({
-      session,
-      user: session?.user ?? null,
-      isAuthenticated: !!session,
-      isLoading: false,
-    });
+
+    if (session) {
+      set({
+        session,
+        user: session.user,
+        isAuthenticated: true,
+        isLoading: false,
+      });
+    } else {
+      // Mock session for development: Dev Team
+      console.log('No real session found, injecting mock Dev Team session');
+      const mockSession = {
+        user: {
+          id: '0',
+          email: 'devteam@postr.com',
+          user_metadata: {
+            username: 'devteam',
+            name: 'Dev Team'
+          }
+        },
+        access_token: 'mock-token',
+        expires_at: Math.floor(Date.now() / 1000) + 3600
+      };
+      set({
+        session: mockSession,
+        user: mockSession.user,
+        isAuthenticated: true,
+        isLoading: false,
+      });
+    }
   },
 }));
 

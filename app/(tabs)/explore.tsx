@@ -9,11 +9,14 @@ import PostCard from '@/components/PostCard';
 import { Post } from '@/types/post';
 import { User } from '@/types/user';
 import { useRouter } from 'expo-router';
-import ForYouFeed from '@/components/ForYouFeed'; // Import the new component
+import ExploreSearchBar from '@/components/ExploreSearchBar';
+import ForYouFeed from '@/components/ForYouFeed';
+import { useExploreSettings } from '@/state/exploreSettings';
 
 export default function ExploreScreen() {
   const { theme } = useTheme();
   const router = useRouter();
+  const { showLocationContent, personalizeTrends, explorationLocation } = useExploreSettings();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<{ posts: Post[], users: User[] }>({ posts: [], users: [] });
   const [isSearching, setIsSearching] = useState(false);
@@ -21,11 +24,19 @@ export default function ExploreScreen() {
 
   React.useEffect(() => {
     const fetchTrends = async () => {
+      // In a real app, we'd pass these settings to the API
       const trendingData = await api.getTrends();
-      setTrends(trendingData);
+
+      // For personalizing, we might shuffle or filter if this was a real backend
+      // Here we just simulate it by slightly changing the order or count
+      if (!personalizeTrends) {
+        setTrends(trendingData.slice().reverse()); // Just to show a difference
+      } else {
+        setTrends(trendingData);
+      }
     };
     fetchTrends();
-  }, []);
+  }, [personalizeTrends]);
 
   const handleSearch = async (query: string) => {
     setSearchQuery(query);
@@ -45,7 +56,7 @@ export default function ExploreScreen() {
     >
       <View style={styles.trendInfo}>
         <Text style={[styles.trendCategory, { color: theme.textTertiary }]}>
-          {index + 1} · Trending
+          {index + 1} · {personalizeTrends ? 'Trending' : 'Worldwide'}
         </Text>
         <Text style={[styles.trendHashtag, { color: theme.textPrimary }]}>
           #{item.hashtag}
@@ -105,23 +116,16 @@ export default function ExploreScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
       {/* Search Header */}
       <View style={styles.searchHeader}>
-        <View style={[styles.searchBar, { backgroundColor: theme.surface }]}>
-          <Ionicons name="search" size={18} color={theme.textTertiary} style={styles.searchIcon} />
-          <TextInput
-            style={[styles.searchInput, { color: theme.textPrimary }]}
-            placeholder="Search Twitter"
-            placeholderTextColor={theme.textTertiary}
-            value={searchQuery}
-            onChangeText={handleSearch}
-            autoCapitalize="none"
-          />
-          {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => handleSearch('')}>
-              <Ionicons name="close-circle" size={18} color={theme.primary} />
-            </TouchableOpacity>
-          )}
-        </View>
-        <TouchableOpacity style={styles.settingsIcon}>
+        <ExploreSearchBar
+          value={searchQuery}
+          onChangeText={handleSearch}
+          placeholder="Search Twitter"
+          containerStyle={{ flex: 1 }}
+        />
+        <TouchableOpacity
+          style={styles.settingsIcon}
+          onPress={() => router.push('/explore/settings')}
+        >
           <Ionicons name="settings-outline" size={24} color={theme.primary} />
         </TouchableOpacity>
       </View>
@@ -133,7 +137,9 @@ export default function ExploreScreen() {
           header={
             <>
               <View style={styles.trendsSection}>
-                <Text style={[styles.trendsTitle, { color: theme.textPrimary }]}>Trends for you</Text>
+                <Text style={[styles.trendsTitle, { color: theme.textPrimary }]}>
+                  {personalizeTrends ? 'Trends for you' : `Trending in ${showLocationContent ? 'Your Location' : explorationLocation}`}
+                </Text>
                 {trends.map((item, index) => (
                   <View key={item.hashtag}>
                     {renderTrendItem({ item, index })}
@@ -166,22 +172,6 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#ddd', // Added a light border
-  },
-  searchBar: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    height: 40, // Increased height for better touchability
-    borderRadius: 20, // Make it more rounded
-    paddingHorizontal: 15,
-  },
-  searchIcon: {
-    marginRight: 10,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
-    height: '100%',
   },
   settingsIcon: {
     marginLeft: 15,

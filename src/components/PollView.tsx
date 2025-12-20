@@ -1,53 +1,162 @@
 
-import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Animated } from 'react-native';
 import { Poll } from '@/types/poll';
+import { useTheme } from '@/theme/theme';
+import { api } from '@/lib/api';
+import { Ionicons } from '@expo/vector-icons';
 
 interface PollViewProps {
   poll: Poll;
+  postId: string;
 }
 
-export default function PollView({ poll }: PollViewProps) {
+export default function PollView({ poll: initialPoll, postId }: PollViewProps) {
+  const { theme } = useTheme();
+  const [poll, setPoll] = useState(initialPoll);
+  const [isVoting, setIsVoting] = useState(false);
+
+  // Sync with prop updates if needed (e.g. from websocket/simulation)
+  React.useEffect(() => {
+    setPoll(initialPoll);
+  }, [initialPoll]);
+
+  const hasVoted = poll.userVoteIndex !== undefined;
+  const isExpired = new Date(poll.expiresAt) < new Date();
+  const showResults = hasVoted || isExpired;
+
+  const handleVote = async (index: number) => {
+    if (showResults || isVoting) return;
+    setIsVoting(true);
+    try {
+      const updatedPost = await api.votePoll(postId, index);
+      if (updatedPost.poll) {
+        setPoll(updatedPost.poll);
+      }
+    } catch (error) {
+      console.error('Failed to vote:', error);
+    } finally {
+      setIsVoting(false);
+    }
+  };
+
+  const calculatePercentage = (count: number) => {
+    if (poll.totalVotes === 0) return 0;
+    return Math.round((count / poll.totalVotes) * 100);
+  };
+
   return (
     <View style={styles.container}>
-      <Text style={styles.question}>{poll.question}</Text>
-      {poll.choices.map((choice, index) => (
-        <View key={index} style={styles.choiceContainer}>
-          <View style={[styles.colorIndicator, { backgroundColor: choice.color }]} />
-          <Text style={styles.choiceText}>{choice.text}</Text>
-          <Text style={styles.voteCount}>{`${choice.vote_count} votes`}</Text>
-        </View>
-      ))}
+      {poll.choices.map((choice, index) => {
+        const percentage = calculatePercentage(choice.vote_count);
+        const isUserChoice = poll.userVoteIndex === index;
+
+        return (
+          <TouchableOpacity
+            key={index}
+            style={[
+              styles.choiceButton,
+              { borderColor: theme.borderLight },
+              showResults && styles.choiceStatic
+            ]}
+            onPress={() => handleVote(index)}
+            disabled={showResults || isVoting}
+            activeOpacity={0.7}
+          >
+            {showResults && (
+              <View
+                style={[
+                  styles.progressBar,
+                  {
+                    width: `${percentage}%`,
+                    backgroundColor: isUserChoice ? theme.primary + '33' : theme.borderLight
+                  }
+                ]}
+              />
+            )}
+
+            <View style={styles.choiceContent}>
+              <Text
+                style={[
+                  styles.choiceText,
+                  { color: theme.textPrimary, fontWeight: isUserChoice ? 'bold' : 'normal' }
+                ]}
+              >
+                {choice.text}
+              </Text>
+              {showResults && (
+                <View style={styles.resultInfo}>
+                  {isUserChoice && (
+                    <Ionicons name="checkmark-circle" size={16} color={theme.primary} style={styles.checkIcon} />
+                  )}
+                  <Text style={[styles.percentageText, { color: theme.textPrimary }]}>
+                    {percentage}%
+                  </Text>
+                </View>
+              )}
+            </View>
+          </TouchableOpacity>
+        );
+      })}
+
+      <View style={styles.footer}>
+        <Text style={[styles.footerText, { color: theme.textTertiary }]}>
+          {poll.totalVotes} votes · {isExpired ? 'Final results' : '1 day left'}
+        </Text>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    marginTop: 10,
+    marginTop: 12,
+    gap: 8,
   },
-  question: {
-    fontWeight: 'bold',
-    fontSize: 16,
-    marginBottom: 10,
+  choiceButton: {
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    overflow: 'hidden',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
   },
-  choiceContainer: {
+  choiceStatic: {
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+  },
+  progressBar: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    borderRadius: 4,
+  },
+  choiceContent: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 5,
-  },
-  colorIndicator: {
-    width: 10,
-    height: 30,
-    borderRadius: 5,
-    marginRight: 10,
+    zIndex: 1,
   },
   choiceText: {
-    flex: 1,
-    fontSize: 14,
+    fontSize: 15,
   },
-  voteCount: {
+  resultInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  percentageText: {
     fontSize: 14,
-    color: '#888',
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  checkIcon: {
+    marginRight: 4,
+  },
+  footer: {
+    marginTop: 4,
+  },
+  footerText: {
+    fontSize: 13,
   },
 });

@@ -4,24 +4,31 @@ import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Keyboard
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '@/theme/theme';
-import { api } from '@/lib/api';
+import { api, CURRENT_USER_ID } from '@/lib/api';
 import { Conversation, Message } from '@/types/message';
 import { User } from '@/types/user';
 import { Ionicons } from '@expo/vector-icons';
 import { eventEmitter } from '@/lib/EventEmitter';
+import { useMessagesSettings } from '@/state/communicationSettings';
 
 export default function ConversationScreen() {
   const { theme } = useTheme();
   const router = useRouter();
   const { id: conversationId } = useLocalSearchParams();
+  const { showReadReceipts } = useMessagesSettings();
 
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [newMessage, setNewMessage] = useState('');
 
+  // Use the current user ID from the API to stay in sync with mock data
+  const currentUserId = CURRENT_USER_ID;
+
   const currentUser: User = {
-    id: '0', name: 'Dev Team', username: 'devteam',
+    id: currentUserId,
+    name: 'Dev Team',
+    username: 'devteam',
     avatar: '',
     is_active: false,
     is_limited: false,
@@ -33,14 +40,11 @@ export default function ConversationScreen() {
   const loadConversationDetails = useCallback(async (id: string) => {
     setLoading(true);
     try {
-      const [convData, messagesData] = await Promise.all([
-        api.getConversation(id),
-        api.getMessages(id),
-      ]);
+      const data = await api.getConversation(id);
 
-      if (convData) {
-        setConversation(convData);
-        setMessages(messagesData.slice().reverse());
+      if (data) {
+        setConversation(data.conversation);
+        setMessages(data.messages.slice().reverse());
       }
     } catch (error) {
       console.error('Error loading conversation:', error);
@@ -68,7 +72,6 @@ export default function ConversationScreen() {
           return [event.message, ...prevMessages];
         });
 
-        // Refresh conversation details if it's a pinning event or similar
         if (event.message.type === 'SYSTEM' && event.message.text.includes('pinned')) {
           loadConversationDetails(conversationId as string);
         }
@@ -83,9 +86,8 @@ export default function ConversationScreen() {
 
   const handleSend = async () => {
     if (newMessage.trim().length === 0 || typeof conversationId !== 'string') return;
-
     try {
-      const sentMessage = await api.sendMessage(conversationId, newMessage.trim());
+      await api.sendMessage(conversationId, newMessage.trim());
       setNewMessage('');
     } catch (error) {
       console.error('Error sending message:', error);
@@ -131,9 +133,7 @@ export default function ConversationScreen() {
 
   const renderHeader = () => {
     if (!conversation) return null;
-
     const otherUser = conversation.participants.find(p => p.id !== currentUser.id);
-
     let title = '';
     let subtitle = '';
 
@@ -188,7 +188,7 @@ export default function ConversationScreen() {
   }
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['bottom']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={{ flex: 1 }}
@@ -196,7 +196,6 @@ export default function ConversationScreen() {
       >
         {renderHeader()}
 
-        {/* Pinned Post Banner */}
         {pinnedPost && (
           <View style={[styles.pinnedBanner, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
             <Ionicons name="pin" size={16} color={theme.primary} style={{ marginRight: 8 }} />
@@ -206,20 +205,20 @@ export default function ConversationScreen() {
                 {pinnedPost.text}
               </Text>
             </View>
-            <TouchableOpacity onPress={() => {/* Scroll to message logic */ }}>
+            <TouchableOpacity onPress={() => { }}>
               <Ionicons name="chevron-forward" size={16} color={theme.textTertiary} />
             </TouchableOpacity>
           </View>
         )}
 
-        {/* Messages List */}
         <FlatList
           data={messages}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => {
             const isMe = item.senderId === currentUser.id;
             const isChannel = conversation.type === 'CHANNEL';
-            const isAdmin = conversation.ownerId === item.senderId;
+            const isItemAdmin = conversation.adminIds?.includes(item.senderId) || conversation.ownerId === item.senderId;
+            const isItemOwner = conversation.ownerId === item.senderId;
             const isSystem = item.type === 'SYSTEM';
 
             if (isSystem) {
@@ -239,8 +238,8 @@ export default function ConversationScreen() {
                     <View style={styles.channelHeader}>
                       <Text style={[styles.channelSenderName, { color: theme.textPrimary }]}>
                         {conversation.name}
-                        {isAdmin && (
-                          <Text style={[styles.adminBadge, { color: theme.primary }]}> • Admin</Text>
+                        {isItemAdmin && (
+                          <Text style={[styles.adminBadge, { color: theme.primary }]}> • {isItemOwner ? 'Owner' : 'Admin'}</Text>
                         )}
                       </Text>
                       <Text style={[styles.channelTime, { color: theme.textTertiary }]}>
@@ -248,8 +247,6 @@ export default function ConversationScreen() {
                       </Text>
                     </View>
                     {renderTextWithMentions(item.text, theme.textPrimary)}
-
-                    {/* Reactions Row */}
                     <View style={styles.reactionsRow}>
                       {item.reactions && Object.entries(item.reactions).map(([emoji, count]) => (
                         <TouchableOpacity
@@ -261,7 +258,7 @@ export default function ConversationScreen() {
                           <Text style={[styles.reactionCount, { color: theme.textSecondary }]}>{count}</Text>
                         </TouchableOpacity>
                       ))}
-                      {isAdmin && (
+                      {isItemAdmin && (
                         <TouchableOpacity
                           onPress={() => handleReaction(item.id, '👍')}
                           style={[styles.reactionBadge, { backgroundColor: theme.surface, opacity: 0.6 }]}
@@ -275,40 +272,44 @@ export default function ConversationScreen() {
               );
             }
 
-            return (
-              <TouchableOpacity
-                onLongPress={() => handlePinMessage(item.id)}
-                delayLongPress={500}
-                style={[
-                  styles.messageContainer,
-                  isMe
-                    ? [styles.myMessage, { backgroundColor: theme.primary }]
-                    : [styles.theirMessage, { backgroundColor: theme.surface }]
-                ]}
-              >
-                {!isMe && conversation.type === 'GROUP' && (
-                  <Text style={[styles.senderName, { color: theme.textSecondary }]}>
-                    {conversation.participants.find(p => p.id === item.senderId)?.name || 'User'}
-                    {isAdmin && <Text style={{ color: theme.primary }}> • Admin</Text>}
-                  </Text>
-                )}
-                {renderTextWithMentions(item.text, isMe ? 'white' : theme.textPrimary)}
+            const senderName = isMe ? 'Me' : (conversation.participants.find(p => p.id === item.senderId)?.name || 'User');
+            const recipientName = isMe ? (conversation.type === 'DM' ? (conversation.participants.find(p => p.id !== currentUser.id)?.name || 'User') : conversation.name) : 'Me';
 
-                {item.reactions && (
-                  <View style={[styles.reactionsRow, { marginTop: 4 }]}>
-                    {Object.entries(item.reactions).map(([emoji, count]) => (
-                      <TouchableOpacity
-                        key={emoji}
-                        onPress={() => handleReaction(item.id, emoji)}
-                        style={[styles.reactionBadge, { backgroundColor: isMe ? 'rgba(255,255,255,0.2)' : theme.background, paddingVertical: 2 }]}
-                      >
-                        <Text style={[styles.reactionEmoji, { fontSize: 10 }]}>{emoji}</Text>
-                        <Text style={[styles.reactionCount, { color: isMe ? 'white' : theme.textSecondary, fontSize: 10 }]}>{count}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
+            return (
+              <View style={{ alignItems: isMe ? 'flex-end' : 'flex-start' }}>
+                <TouchableOpacity
+                  onLongPress={() => handlePinMessage(item.id)}
+                  delayLongPress={500}
+                  style={[
+                    styles.messageContainer,
+                    isMe
+                      ? [styles.myMessage, { backgroundColor: theme.primary }]
+                      : [styles.theirMessage, { backgroundColor: theme.surface }]
+                  ]}
+                >
+                  <Text style={[styles.senderName, { color: isMe ? 'rgba(255,255,255,0.7)' : theme.textSecondary, fontSize: 11, marginBottom: 4 }]}>
+                    {senderName} {isMe ? '->' : '<-'} {recipientName}
+                  </Text>
+                  {renderTextWithMentions(item.text, isMe ? 'white' : theme.textPrimary)}
+                  {item.reactions && (
+                    <View style={[styles.reactionsRow, { marginTop: 4 }]}>
+                      {Object.entries(item.reactions).map(([emoji, count]) => (
+                        <TouchableOpacity
+                          key={emoji}
+                          onPress={() => handleReaction(item.id, emoji)}
+                          style={[styles.reactionBadge, { backgroundColor: isMe ? 'rgba(255,255,255,0.2)' : theme.background, paddingVertical: 2 }]}
+                        >
+                          <Text style={[styles.reactionEmoji, { fontSize: 10 }]}>{emoji}</Text>
+                          <Text style={[styles.reactionCount, { color: isMe ? 'white' : theme.textSecondary, fontSize: 10 }]}>{count}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  )}
+                </TouchableOpacity>
+                {isMe && showReadReceipts && messages[0].id === item.id && (
+                  <Text style={[styles.readReceipt, { color: theme.textTertiary }]}>Read</Text>
                 )}
-              </TouchableOpacity>
+              </View>
             );
           }}
           style={styles.messageList}
@@ -327,8 +328,7 @@ export default function ConversationScreen() {
           }
         />
 
-        {/* Composer */}
-        {conversation.type !== 'CHANNEL' || conversation.ownerId === currentUser.id ? (
+        {conversation.type !== 'CHANNEL' || conversation.adminIds?.includes(currentUser.id) || conversation.ownerId === currentUser.id ? (
           <View style={[styles.composerContainer, { borderTopColor: theme.surface, backgroundColor: theme.background }]}>
             <TextInput
               style={[styles.input, { backgroundColor: theme.surface, color: theme.textPrimary }]}
@@ -428,6 +428,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  readReceipt: {
+    fontSize: 11,
+    marginRight: 15,
+    marginBottom: 4,
+    marginTop: -2,
+  },
   senderName: {
     fontSize: 13,
     marginBottom: 2,
@@ -440,7 +446,7 @@ const styles = StyleSheet.create({
   channelMessageContainer: {
     paddingHorizontal: 15,
     paddingVertical: 10,
-    transform: [{ scaleY: -1 }], // Accounts for inverted FlatList
+    transform: [{ scaleY: -1 }],
   },
   channelMessageContent: {
     width: '100%',
@@ -521,7 +527,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    transform: [{ scaleY: -1 }], // Accounts for inverted FlatList
+    transform: [{ scaleY: -1 }],
   },
   emptyText: {
     fontSize: 16,

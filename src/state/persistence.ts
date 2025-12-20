@@ -1,4 +1,4 @@
-import MMKV from 'react-native-mmkv';
+const { MMKV } = require('react-native-mmkv');
 import { PendingReaction } from '../types/pendingReaction';
 
 const storage = new MMKV({ id: 'pending-reactions' });

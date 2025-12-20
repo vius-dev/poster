@@ -9,12 +9,17 @@ import NotificationItem from '@/components/NotificationItem';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/providers/AuthProvider';
 import { Image } from 'react-native';
+import { useRouter } from 'expo-router';
 
 type Tab = 'ALL' | 'MENTIONS';
+
+import { useNotificationsSettings } from '@/state/communicationSettings';
 
 export default function NotificationsScreen() {
   const { theme } = useTheme();
   const { user } = useAuth();
+  const router = useRouter();
+  const { qualityFilter, mentionsOnly, mutedWords } = useNotificationsSettings();
   const [activeTab, setActiveTab] = useState<Tab>('ALL');
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,8 +41,25 @@ export default function NotificationsScreen() {
   };
 
   const filteredNotifications = notifications.filter(n => {
-    if (activeTab === 'ALL') return true;
-    return n.type === 'MENTION' || n.type === 'REPLY';
+    // 1. Quality Filter (Hide reactions if filtering is aggressive)
+    if (qualityFilter && n.type === 'REACTION') return false;
+
+    // 2. Mentions Only Setting (Global filter)
+    if (mentionsOnly && n.type !== 'MENTION' && n.type !== 'REPLY') return false;
+
+    // 3. Muted Words Filter
+    if (mutedWords.length > 0) {
+      const content = (n.post?.content || '').toLowerCase();
+      const hasMutedWord = mutedWords.some(word => content.includes(word));
+      if (hasMutedWord) return false;
+    }
+
+    // 4. Tab Filter
+    if (activeTab === 'MENTIONS') {
+      return n.type === 'MENTION' || n.type === 'REPLY';
+    }
+
+    return true;
   });
 
   return (
@@ -47,7 +69,7 @@ export default function NotificationsScreen() {
         <View style={styles.headerTop}>
           <Image source={{ uri: user?.avatar }} style={styles.avatar} />
           <Text style={[styles.headerTitle, { color: theme.textPrimary }]}>Notifications</Text>
-          <TouchableOpacity>
+          <TouchableOpacity onPress={() => router.push('/notifications/settings')}>
             <Ionicons name="settings-outline" size={24} color={theme.primary} />
           </TouchableOpacity>
         </View>

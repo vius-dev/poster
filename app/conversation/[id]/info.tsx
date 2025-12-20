@@ -1,12 +1,14 @@
 
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, FlatList } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, FlatList, TextInput, Clipboard, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '@/theme/theme';
 import { api } from '@/lib/api';
 import { Conversation } from '@/types/message';
 import { Ionicons } from '@expo/vector-icons';
+
+import { CURRENT_USER_ID } from '@/lib/api';
 
 type InfoTab = 'Info' | 'Members' | 'Media' | 'Settings';
 
@@ -17,6 +19,9 @@ export default function InfoScreen() {
     const [conversation, setConversation] = useState<Conversation | null>(null);
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState<InfoTab>('Info');
+    const [isEditing, setIsEditing] = useState(false);
+    const [editName, setEditName] = useState('');
+    const [editDescription, setEditDescription] = useState('');
 
     useEffect(() => {
         if (typeof conversationId === 'string') {
@@ -28,7 +33,7 @@ export default function InfoScreen() {
         setLoading(true);
         try {
             const data = await api.getConversation(id);
-            if (data) setConversation(data);
+            if (data) setConversation(data.conversation);
         } catch (error) {
             console.error('Error loading info:', error);
         } finally {
@@ -51,39 +56,162 @@ export default function InfoScreen() {
         );
     }
 
+    const isOwner = conversation.ownerId === CURRENT_USER_ID;
+    const isAdmin = conversation.adminIds?.includes(CURRENT_USER_ID) || isOwner;
     const isChannel = conversation.type === 'CHANNEL';
     const tabs: InfoTab[] = ['Info', 'Members', 'Media', 'Settings'];
 
+    const handlePromote = async (userId: string) => {
+        try {
+            await api.promoteToAdmin(conversationId as string, userId);
+            loadInfo(conversationId as string);
+        } catch (error: any) {
+            alert(error.message);
+        }
+    };
+
+    const handleDemote = async (userId: string) => {
+        try {
+            await api.demoteFromAdmin(conversationId as string, userId);
+            loadInfo(conversationId as string);
+        } catch (error: any) {
+            alert(error.message);
+        }
+    };
+
+    const handleRemove = async (userId: string) => {
+        try {
+            await api.removeFromConversation(conversationId as string, userId);
+            loadInfo(conversationId as string);
+        } catch (error: any) {
+            alert(error.message);
+        }
+    };
+
+    const handleLeave = async () => {
+        try {
+            await api.leaveConversation(conversationId as string);
+            router.replace('/(tabs)/messages');
+        } catch (error: any) {
+            alert(error.message);
+        }
+    };
+
+    const handleDelete = async () => {
+        try {
+            await api.deleteConversation(conversationId as string);
+            router.replace('/(tabs)/messages');
+        } catch (error: any) {
+            alert(error.message);
+        }
+    };
+
+    const handleUpdate = async () => {
+        try {
+            await api.updateConversation(conversationId as string, {
+                name: editName,
+                description: editDescription
+            });
+            setIsEditing(false);
+            loadInfo(conversationId as string);
+        } catch (error: any) {
+            alert(error.message);
+        }
+    };
+
+    const handleEdit = () => {
+        setEditName(conversation.name || '');
+        setEditDescription(conversation.description || '');
+        setIsEditing(true);
+    };
+
     const renderInfoTab = () => (
         <ScrollView style={styles.tabContent}>
-            <View style={styles.infoSection}>
-                <View style={[styles.avatarContainer, { backgroundColor: theme.surface }]}>
-                    <Ionicons
-                        name={isChannel ? 'megaphone-outline' : 'people-outline'}
-                        size={60}
-                        color={theme.textSecondary}
-                    />
-                </View>
-                <Text style={[styles.name, { color: theme.textPrimary }]}>{conversation.name}</Text>
-                <Text style={[styles.subtitle, { color: theme.textTertiary }]}>
-                    {isChannel ? 'Broadcast Channel' : 'Group Chat'} • {conversation.participants.length} members
-                </Text>
-            </View>
+            {isEditing ? (
+                <View style={styles.editSection}>
+                    <Text style={[styles.label, { color: theme.textSecondary }]}>{isChannel ? 'CHANNEL NAME' : 'GROUP NAME'}</Text>
+                    <View style={[styles.inputContainer, { backgroundColor: theme.surface }]}>
+                        <TextInput
+                            style={[styles.input, { color: theme.textPrimary }]}
+                            value={editName}
+                            onChangeText={setEditName}
+                            placeholder="Name"
+                            placeholderTextColor={theme.textTertiary}
+                        />
+                    </View>
 
-            {conversation.description && (
+                    <Text style={[styles.label, { color: theme.textSecondary, marginTop: 20 }]}>DESCRIPTION</Text>
+                    <View style={[styles.inputContainer, styles.textAreaContainer, { backgroundColor: theme.surface }]}>
+                        <TextInput
+                            style={[styles.input, styles.textArea, { color: theme.textPrimary }]}
+                            value={editDescription}
+                            onChangeText={setEditDescription}
+                            placeholder="Description"
+                            placeholderTextColor={theme.textTertiary}
+                            multiline
+                        />
+                    </View>
+
+                    <View style={styles.editActions}>
+                        <TouchableOpacity
+                            style={[styles.editButton, { borderColor: theme.border, borderWidth: 1 }]}
+                            onPress={() => setIsEditing(false)}
+                        >
+                            <Text style={{ color: theme.textPrimary }}>Cancel</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.editButton, { backgroundColor: theme.primary }]}
+                            onPress={handleUpdate}
+                        >
+                            <Text style={{ color: 'white', fontWeight: 'bold' }}>Save</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            ) : (
+                <View style={styles.infoSection}>
+                    <View style={[styles.avatarContainer, { backgroundColor: theme.surface }]}>
+                        <Ionicons
+                            name={isChannel ? 'megaphone-outline' : 'people-outline'}
+                            size={60}
+                            color={theme.textSecondary}
+                        />
+                    </View>
+                    <Text style={[styles.name, { color: theme.textPrimary }]}>{conversation.name}</Text>
+                    <Text style={[styles.subtitle, { color: theme.textTertiary }]}>
+                        {isChannel ? 'Broadcast Channel' : 'Group Chat'} • {conversation.participants.length} members
+                    </Text>
+
+                    {isAdmin && (
+                        <TouchableOpacity style={styles.editIcon} onPress={handleEdit}>
+                            <Ionicons name="pencil" size={16} color={theme.primary} />
+                            <Text style={{ color: theme.primary, marginLeft: 4, fontWeight: '600' }}>Edit</Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
+            )}
+
+            {!isEditing && conversation.description && (
                 <View style={[styles.descriptionSection, { borderTopColor: theme.surface }]}>
                     <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>Description</Text>
                     <Text style={[styles.description, { color: theme.textPrimary }]}>{conversation.description}</Text>
                 </View>
             )}
 
-            <View style={[styles.metaSection, { borderTopColor: theme.surface }]}>
-                <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>Link</Text>
-                <TouchableOpacity style={styles.linkContainer}>
-                    <Text style={[styles.linkText, { color: theme.primary }]}>postr.app/{conversation.id}</Text>
-                    <Ionicons name="copy-outline" size={16} color={theme.primary} />
-                </TouchableOpacity>
-            </View>
+            {!isEditing && (
+                <View style={[styles.metaSection, { borderTopColor: theme.surface }]}>
+                    <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>Link</Text>
+                    <TouchableOpacity
+                        style={styles.linkContainer}
+                        onPress={() => {
+                            Clipboard.setString(`https://postr.app/${conversation.id}`);
+                            Alert.alert('Link Copied', 'Conversation link has been copied to clipboard.');
+                        }}
+                    >
+                        <Text style={[styles.linkText, { color: theme.primary }]}>postr.app/{conversation.id}</Text>
+                        <Ionicons name="copy-outline" size={16} color={theme.primary} />
+                    </TouchableOpacity>
+                </View>
+            )}
         </ScrollView>
     );
 
@@ -93,20 +221,56 @@ export default function InfoScreen() {
                 data={conversation.participants}
                 keyExtractor={(item) => item.id}
                 contentContainerStyle={{ padding: 15 }}
-                renderItem={({ item }) => (
-                    <View style={styles.memberItem}>
-                        <Image source={{ uri: item.avatar }} style={styles.memberAvatar} />
-                        <View style={styles.memberInfo}>
-                            <Text style={[styles.memberName, { color: theme.textPrimary }]}>{item.name}</Text>
-                            <Text style={[styles.memberUsername, { color: theme.textTertiary }]}>@{item.username}</Text>
-                        </View>
-                        {conversation.ownerId === item.id && (
-                            <View style={[styles.adminBadgeContainer, { backgroundColor: theme.surface }]}>
-                                <Text style={[styles.adminBadgeText, { color: theme.primary }]}>Admin</Text>
+                renderItem={({ item }) => {
+                    const isItemAdmin = conversation.adminIds?.includes(item.id) || conversation.ownerId === item.id;
+                    const isItemOwner = conversation.ownerId === item.id;
+
+                    return (
+                        <View style={styles.memberItem}>
+                            <Image source={{ uri: item.avatar }} style={styles.memberAvatar} />
+                            <View style={styles.memberInfo}>
+                                <Text style={[styles.memberName, { color: theme.textPrimary }]}>{item.name}</Text>
+                                <Text style={[styles.memberUsername, { color: theme.textTertiary }]}>@{item.username}</Text>
                             </View>
-                        )}
-                    </View>
-                )}
+                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                {isItemAdmin && (
+                                    <View style={[styles.adminBadgeContainer, { backgroundColor: theme.surface, marginRight: 8 }]}>
+                                        <Text style={[styles.adminBadgeText, { color: theme.primary }]}>
+                                            {isItemOwner ? 'Owner' : 'Admin'}
+                                        </Text>
+                                    </View>
+                                )}
+
+                                {isAdmin && item.id !== CURRENT_USER_ID && !isItemOwner && (
+                                    <TouchableOpacity
+                                        onPress={() => {
+                                            if (isItemAdmin && !isOwner) return; // Only owner can demote admins
+
+                                            // Show management sheet
+                                            const options = [];
+                                            if (isOwner) {
+                                                if (isItemAdmin) options.push({ label: 'Demote from Admin', onPress: () => handleDemote(item.id) });
+                                                else options.push({ label: 'Promote to Admin', onPress: () => handlePromote(item.id) });
+                                            }
+                                            options.push({ label: 'Remove from Conversation', onPress: () => handleRemove(item.id), destructive: true });
+
+                                            // For simplicity using native alert/confirm since I don't have a generic action sheet ready here locally
+                                            if (isItemAdmin) {
+                                                if (isOwner) {
+                                                    handleDemote(item.id);
+                                                }
+                                            } else {
+                                                handlePromote(item.id);
+                                            }
+                                        }}
+                                    >
+                                        <Ionicons name="ellipsis-vertical" size={20} color={theme.textTertiary} />
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+                        </View>
+                    );
+                }}
             />
         </View>
     );
@@ -133,17 +297,37 @@ export default function InfoScreen() {
                 <Text style={[styles.actionText, { color: theme.textPrimary }]}>Invite Link</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={[styles.actionItem, { borderTopColor: theme.surface }]}>
-                <Ionicons name="shield-checkmark-outline" size={24} color={theme.textPrimary} />
-                <Text style={[styles.actionText, { color: theme.textPrimary }]}>Admin Permissions</Text>
-            </TouchableOpacity>
+            {isAdmin && (
+                <TouchableOpacity
+                    style={[styles.actionItem, { borderTopColor: theme.surface }]}
+                    onPress={handleEdit}
+                >
+                    <Ionicons name="create-outline" size={24} color={theme.textPrimary} />
+                    <Text style={[styles.actionText, { color: theme.textPrimary }]}>Edit {isChannel ? 'Channel' : 'Group'}</Text>
+                </TouchableOpacity>
+            )}
 
-            <TouchableOpacity style={[styles.actionItem, { borderTopColor: theme.surface }]}>
-                <Ionicons name="log-out-outline" size={24} color="#FF3B30" />
-                <Text style={[styles.actionText, { color: '#FF3B30' }]}>
-                    {isChannel ? 'Leave Channel' : 'Leave Group'}
-                </Text>
-            </TouchableOpacity>
+            {!isOwner ? (
+                <TouchableOpacity
+                    style={[styles.actionItem, { borderTopColor: theme.surface }]}
+                    onPress={handleLeave}
+                >
+                    <Ionicons name="log-out-outline" size={24} color="#FF3B30" />
+                    <Text style={[styles.actionText, { color: '#FF3B30' }]}>
+                        {isChannel ? 'Leave Channel' : 'Leave Group'}
+                    </Text>
+                </TouchableOpacity>
+            ) : (
+                <TouchableOpacity
+                    style={[styles.actionItem, { borderTopColor: theme.surface }]}
+                    onPress={handleDelete}
+                >
+                    <Ionicons name="trash-outline" size={24} color="#FF3B30" />
+                    <Text style={[styles.actionText, { color: '#FF3B30' }]}>
+                        Delete {isChannel ? 'Channel' : 'Group'}
+                    </Text>
+                </TouchableOpacity>
+            )}
         </ScrollView>
     );
 
@@ -160,7 +344,7 @@ export default function InfoScreen() {
 
             {/* Tab Bar */}
             <View style={[styles.tabBar, { borderBottomColor: theme.surface }]}>
-                {tabs.map((tab) => (
+                {tabs.map((tab: InfoTab) => (
                     <TouchableOpacity
                         key={tab}
                         onPress={() => setActiveTab(tab)}
@@ -326,5 +510,51 @@ const styles = StyleSheet.create({
     actionText: {
         fontSize: 17,
         marginLeft: 15,
+    },
+    editSection: {
+        padding: 20,
+    },
+    label: {
+        fontSize: 12,
+        fontWeight: '700',
+        marginBottom: 8,
+        letterSpacing: 0.5,
+    },
+    inputContainer: {
+        paddingHorizontal: 15,
+        borderRadius: 12,
+        height: 50,
+        justifyContent: 'center',
+    },
+    input: {
+        fontSize: 16,
+    },
+    textAreaContainer: {
+        height: 120,
+        paddingVertical: 10,
+        alignItems: 'flex-start',
+    },
+    textArea: {
+        width: '100%',
+        textAlignVertical: 'top',
+        height: '100%',
+    },
+    editActions: {
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        marginTop: 20,
+    },
+    editButton: {
+        paddingHorizontal: 20,
+        paddingVertical: 10,
+        borderRadius: 20,
+        marginLeft: 10,
+    },
+    editIcon: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 10,
+        padding: 8,
+        borderRadius: 15,
     },
 });

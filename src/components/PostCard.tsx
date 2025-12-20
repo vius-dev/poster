@@ -138,7 +138,7 @@ export default function PostCard({ post, isFocal = false }: PostCardProps) {
               {post.media && post.media.length > 0 && (
                 <MediaGrid media={post.media} onPress={goToPost} />
               )}
-              {post.poll && <PollView poll={post.poll} />}
+              {post.poll && <PollView poll={post.poll} postId={post.id} />}
               {post.quotedPost && <QuotedPost post={post.quotedPost} />}
             </TouchableOpacity>
           </Card.Content>

@@ -1,14 +1,16 @@
 
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '@/theme/theme';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import ExploreSearchBar from '@/components/ExploreSearchBar';
 
 export default function NewMessageScreen() {
   const { theme } = useTheme();
   const router = useRouter();
+  const [searchQuery, setSearchQuery] = useState('');
 
   const menuItems = [
     {
@@ -16,7 +18,7 @@ export default function NewMessageScreen() {
       title: 'Direct Message',
       subtitle: 'Start a private conversation',
       onPress: () => {
-        router.push('/(modals)/new-dm'); 
+        router.push('/(modals)/new-dm');
       },
     },
     {
@@ -38,16 +40,39 @@ export default function NewMessageScreen() {
   ];
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
       <View style={styles.header}>
-        <Text style={[styles.title, { color: theme.textPrimary }]}>New Message</Text>
         <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="close" size={28} color={theme.textPrimary} />
         </TouchableOpacity>
+        <Text style={[styles.title, { color: theme.textPrimary }]}>New Message</Text>
+        <View style={{ width: 28 }} />
       </View>
-      <View style={styles.menu}>
+
+      <View style={{ padding: 15 }}>
+        <ExploreSearchBar
+          value={searchQuery}
+          onChangeText={(text) => {
+            setSearchQuery(text);
+            if (text.length > 0) {
+              // Redirect to new-dm with query if user starts typing
+              router.push({
+                pathname: '/(modals)/new-dm',
+                params: { q: text }
+              });
+            }
+          }}
+          placeholder="Search people"
+        />
+      </View>
+
+      <ScrollView style={styles.menu}>
         {menuItems.map((item, index) => (
-          <TouchableOpacity key={index} style={[styles.menuItem, { borderBottomColor: theme.surface }]} onPress={item.onPress}>
+          <TouchableOpacity
+            key={index}
+            style={[styles.menuItem, { borderBottomColor: theme.surface }]}
+            onPress={item.onPress}
+          >
             <Ionicons name={item.icon as any} size={28} color={theme.primary} style={styles.icon} />
             <View style={styles.menuTextContainer}>
               <Text style={[styles.menuTitle, { color: theme.textPrimary }]}>{item.title}</Text>
@@ -56,7 +81,7 @@ export default function NewMessageScreen() {
             <Ionicons name="chevron-forward" size={22} color={theme.textTertiary} />
           </TouchableOpacity>
         ))}
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }

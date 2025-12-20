@@ -8,4 +8,7 @@ export type PollChoice = {
 export type Poll = {
   question: string;
   choices: PollChoice[];
+  userVoteIndex?: number;
+  totalVotes: number;
+  expiresAt: string;
 };

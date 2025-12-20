@@ -7,6 +7,7 @@ import { FeedEngine } from './feed/FeedEngine';
 import { ViewerRelationship } from "@/components/profile/ProfileActionRow";
 import { Notification } from "@/types/notification";
 import { Conversation, Message } from "@/types/message";
+import { PostrList } from "@/types/lists";
 import { eventEmitter } from "@/lib/EventEmitter";
 
 /**
@@ -14,6 +15,43 @@ import { eventEmitter } from "@/lib/EventEmitter";
  * PRODUCTION MOCK API - SOCIAL PLATFORM BACKEND SIMULATION
  * =============================================================================
  * 
+ * This file serves as a high-fidelity "mirror" of a Supabase/PostgreSQL 
+ * production backend. It simulates complex social graph interactions, 
+ * real-time fan-out, and administrative moderation.
+ * 
+ * --- BACKEND ARCHITECTURE BLUEPRINT ---
+ * 
+ * [RLS - ROW LEVEL SECURITY]
+ * - posts: { SELECT: (is_public OR author_id=uid() OR author_id IN (follows)), INSERT: auth.uid()=author_id }
+ * - profiles: { SELECT: true, UPDATE: auth.uid()=id }
+ * - conversations: { SELECT: auth.uid() IN (participants), INSERT: auth.uid() IN (participants) }
+ * - notifications: { SELECT: auth.uid()=recipient_id, UPDATE: auth.uid()=recipient_id }
+ * 
+ * [TRIGGERS - DATABASE AUTOMATIONS]
+ * - on_post_insert: 
+ *   1. Increment user.post_count
+ *   2. If @mentions: Insert into notifications
+ *   3. If #hashtags: Update hashtag_usage leaderboard
+ * - on_interaction (like/repost):
+ *   1. Increment/Decrement post.counts
+ *   2. Notify author if actor != author
+ * - on_follow:
+ *   1. Increment following_count (actor) and followers_count (target)
+ * 
+ * [EDGE FUNCTIONS - SERVERLESS COMPUTE]
+ * - push_fanout: Dispatches mobile push notifications to all followers on new post.
+ * - media_optimize: Processes raw uploads (Resize, JPEG-XL, BlurHash generation).
+ * - safety_filter: Asynchronous AI content scanning (LLM/Vision) for policy violations.
+ * 
+ * [CRON JOBS - SCHEDULED TASKS]
+ * - compute_trends: Every 10m - Scans recent hashtag usage and rank globally.
+ * - cleanup_orphans: Every 24h - Removes messages in deleted conversations.
+ * - report_aggregator: Hourly - Batches high-volume reports for moderator review.
+ * 
+ * =============================================================================
+ */
+
+/**
  * A complete, production-ready mock API that simulates a real social media
  * platform backend with all features working realistically.
  * 
@@ -39,7 +77,7 @@ import { eventEmitter } from "@/lib/EventEmitter";
 // =============================================================================
 
 /** Current authenticated user ID */
-const CURRENT_USER_ID = '0';
+let CURRENT_USER_ID = '0';
 
 /** Admin user IDs */
 const ADMIN_USER_IDS = new Set(['0', 'admin', 'moderator_1', 'moderator_2']);
@@ -64,19 +102,21 @@ const SIMULATION_CONFIG = {
 // DATA STRUCTURES - SOCIAL GRAPH & CONTENT
 // =============================================================================
 
-/** Tracks who follows whom: userId -> Set<followedUserId> */
+/** 
+ * Social Graph: followerId -> Set<followedId> 
+ * SQL: followers table (id, follower_id, following_id, created_at)
+ * TRIGGER: on_follow - sync user.following_count / user.followers_count
+ */
 const followingMap = new Map<string, Set<string>>();
 
-/** Tracks followers: userId -> Set<followerId> */
+/** Social Graph: followedId -> Set<followerId> */
 const followersMap = new Map<string, Set<string>>();
 
-/** Tracks muted users: userId -> Set<mutedUserId> */
-const mutedMap = new Map<string, Set<string>>();
-
-/** Tracks blocked users: userId -> Set<blockedUserId> */
-const blockedMap = new Map<string, Set<string>>();
-
-/** Tracks bookmarked posts: userId -> Set<postId> */
+/** 
+ * Tracks bookmarked posts: userId -> Set<postId> 
+ * SQL: bookmarks table (id, user_id, post_id, created_at)
+ * RLS: user_id = auth.uid()
+ */
 const bookmarksMap = new Map<string, Set<string>>();
 
 /** Tracks post reactions: postId -> Map<userId, ReactionAction> */
@@ -85,10 +125,32 @@ const reactionsMap = new Map<string, Map<string, ReactionAction>>();
 /** Tracks reposts: postId -> Set<userId> */
 const repostsMap = new Map<string, Set<string>>();
 
+/** Muted users: userId -> Set<mutedUserId> */
+const mutedMap = new Map<string, Set<string>>();
+
+/** Blocked users: userId -> Set<blockedUserId> */
+const blockedMap = new Map<string, Set<string>>();
+
+/** All lists in the system */
+const allLists: PostrList[] = [
+  {
+    id: 'list-1',
+    name: 'Tech News',
+    ownerId: '1',
+    isPrivate: false,
+    memberIds: ['2', '3', '4'],
+    subscriberIds: ['0', '1'],
+    createdAt: new Date().toISOString()
+  }
+];
+
 /** All notifications in the system */
 const allNotifications: Notification[] = [];
 
-/** Hashtag usage tracking: hashtag -> count */
+/** 
+ * Hashtag usage tracking: hashtag -> count 
+ * CRON: Monthly reset or weight decay for "Trending"
+ */
 const hashtagUsage = new Map<string, number>();
 
 /** Tracks post views: postId -> Set<userId> */
@@ -271,7 +333,7 @@ class RateLimiter {
     const remaining = this.getRemainingActions();
     if (remaining === 0) {
       const waitSeconds = Math.ceil((this.getResetTime() - Date.now()) / 1000);
-      return `Rate limit exceeded. Try again in ${waitSeconds}s. (${this.limit} actions per ${this.windowMs / 1000}s)`;
+      return `Rate limit exceeded.Try again in ${waitSeconds} s. (${this.limit} actions per ${this.windowMs / 1000}s)`;
     }
     return `${remaining} actions remaining`;
   }
@@ -281,7 +343,7 @@ class RateLimiter {
    */
   private logState(): void {
     if (SIMULATION_CONFIG.VERBOSE_LOGGING) {
-      console.log(`[${this.name}] Actions: ${this.actions.length}/${this.limit}, Remaining: ${this.getRemainingActions()}`);
+      console.log(`[${this.name}]Actions: ${this.actions.length}/${this.limit}, Remaining: ${this.getRemainingActions()}`);
     }
   }
 
@@ -365,6 +427,12 @@ const createNotification = (notification: Omit<Notification, 'id' | 'createdAt' 
     return;
   }
 
+  // Check if recipient has blocked the actor
+  const recipientBlocked = blockedMap.get(notification.recipientId);
+  if (recipientBlocked && recipientBlocked.has(notification.actor.id)) {
+    return;
+  }
+
   // Check for duplicate recent notifications (prevent spam)
   const recentDuplicate = allNotifications.find(n =>
     n.recipientId === notification.recipientId &&
@@ -409,7 +477,7 @@ const createNotification = (notification: Omit<Notification, 'id' | 'createdAt' 
 const generateMockUsers = (): User[] => {
   const users: User[] = [
     {
-      id: CURRENT_USER_ID,
+      id: '0',
       name: 'Dev Team',
       username: 'devteam',
       avatar: 'https://i.pravatar.cc/150?u=devteam',
@@ -584,6 +652,29 @@ const allPosts: Post[] = [
   { id: '118', author: userMap.get('3')!, content: 'Fresh post 18', createdAt: new Date(Date.now() - 1000 * 60 * 18).toISOString(), likeCount: 0, dislikeCount: 0, laughCount: 0, repostCount: 0, commentCount: 0, userReaction: 'NONE' },
   { id: '119', author: userMap.get('1')!, content: 'Fresh post 19', createdAt: new Date(Date.now() - 1000 * 60 * 19).toISOString(), likeCount: 0, dislikeCount: 0, laughCount: 0, repostCount: 0, commentCount: 0, userReaction: 'NONE' },
   { id: '120', author: userMap.get('2')!, content: 'Fresh post 20', createdAt: new Date(Date.now() - 1000 * 60 * 20).toISOString(), likeCount: 0, dislikeCount: 0, laughCount: 0, repostCount: 0, commentCount: 0, userReaction: 'NONE' },
+  {
+    id: 'poll-1',
+    author: userMap.get('1')!,
+    content: 'Which feature do you like most in Postr?',
+    createdAt: new Date(Date.now() - 1000 * 60 * 120).toISOString(),
+    likeCount: 5,
+    dislikeCount: 0,
+    laughCount: 2,
+    repostCount: 1,
+    commentCount: 0,
+    userReaction: 'NONE',
+    poll: {
+      question: 'Which feature do you like most in Postr?',
+      choices: [
+        { text: 'Real-time Feed', color: '#1DA1F2', vote_count: 12 },
+        { text: 'Living World Simulation', color: '#17BF63', vote_count: 8 },
+        { text: 'Separation of Concerns', color: '#794BC4', vote_count: 15 },
+        { text: 'Pre-2023 Aesthetics', color: '#F45D22', vote_count: 10 },
+      ],
+      totalVotes: 45,
+      expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24).toISOString()
+    }
+  },
 ];
 
 /**
@@ -627,7 +718,7 @@ const mockMessages: Record<string, Message[]> = {
   ],
   'conv-2': [],
   'conv-3': [
-    { id: 'ms1', senderId: '1', text: 'John Doe joined the group', createdAt: new Date(Date.now() - 1000 * 60 * 60 * 3).toISOString(), type: 'SYSTEM' },
+    { id: 'ms1', senderId: '0', text: 'Dev Team created the group', createdAt: new Date(Date.now() - 1000 * 60 * 60 * 3).toISOString(), type: 'SYSTEM' },
     { id: 'm8', senderId: '1', text: 'Anyone hitting a bug with the latest Expo SDK?', createdAt: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(), type: 'CHAT' }
   ],
   'conv-4': [
@@ -640,7 +731,7 @@ const mockMessages: Record<string, Message[]> = {
 const mockConversations: Conversation[] = [
   {
     id: 'conv-1',
-    participants: [userMap.get(CURRENT_USER_ID)!, userMap.get('1')!],
+    participants: Array.from(new Set([CURRENT_USER_ID, '1'])).map(id => userMap.get(id)!),
     lastMessage: mockMessages['conv-1'][mockMessages['conv-1'].length - 1],
     unreadCount: 1,
     type: "DM",
@@ -648,7 +739,7 @@ const mockConversations: Conversation[] = [
   },
   {
     id: 'conv-2',
-    participants: [userMap.get(CURRENT_USER_ID)!, userMap.get('2')!],
+    participants: Array.from(new Set([CURRENT_USER_ID, '2'])).map(id => userMap.get(id)!),
     lastMessage: {
       id: 'msg-2',
       senderId: '0',
@@ -661,22 +752,24 @@ const mockConversations: Conversation[] = [
   {
     id: 'conv-3',
     name: 'React Native Devs',
-    participants: [userMap.get(CURRENT_USER_ID)!, userMap.get('1')!, userMap.get('3')!],
+    participants: Array.from(new Set([CURRENT_USER_ID, '0', '1', '3'])).map(id => userMap.get(id)!),
     lastMessage: mockMessages['conv-3'][mockMessages['conv-3'].length - 1],
     unreadCount: 3,
     type: "GROUP",
-    ownerId: '1',
+    ownerId: '0',
+    adminIds: ['0'],
     description: 'A group for discussing React Native development and best practices.',
     isPinned: true
   },
   {
     id: 'conv-4',
     name: 'Expo Fanatics',
-    participants: [userMap.get(CURRENT_USER_ID)!, userMap.get('2')!, userMap.get('4')!, userMap.get('5')!],
+    participants: Array.from(new Set([CURRENT_USER_ID, '0', '2', '4', '5'])).map(id => userMap.get(id)!),
     lastMessage: mockMessages['conv-4'][mockMessages['conv-4'].length - 1],
     unreadCount: 0,
     type: "CHANNEL",
-    ownerId: '2',
+    ownerId: '0',
+    adminIds: ['0'],
     description: 'Official announcements and updates from the Expo ecosystem.',
     pinnedMessageId: 'ms2'
   }
@@ -737,6 +830,19 @@ const hydratePost = (post: Post, viewerId: string = CURRENT_USER_ID): Post => {
     laughCount: post.laughCount + additionalLaughs,
     repostCount: post.repostCount + additionalReposts,
   };
+
+  // Hydrate poll data if present
+  if (hydrated.poll) {
+    const userVotes = pollVotesMap.get(post.id);
+    const userVoteIndex = userVotes?.get(viewerId);
+    const totalVotes = hydrated.poll.choices.reduce((sum, choice) => sum + (choice.vote_count || 0), 0);
+
+    hydrated.poll = {
+      ...hydrated.poll,
+      userVoteIndex,
+      totalVotes,
+    };
+  }
 
   // Recursively hydrate nested content
   if (hydrated.comments) {
@@ -930,12 +1036,10 @@ const adminApi = {
     };
   },
 
-  // ---------------------------------------------------------------------------
-  // USER MANAGEMENT
-  // ---------------------------------------------------------------------------
-
   /**
    * Get paginated user list with filtering
+   * SQL: SELECT * FROM profiles WHERE status = :filter ...
+   * RLS: Bypass required (Service Role or Admin role check).
    */
   getUsers: async (params: {
     page?: number;
@@ -1131,7 +1235,10 @@ const adminApi = {
   },
 
   /**
-   * Update user account status
+   * Update user account status (Moderation Action)
+   * SQL: UPDATE profiles SET status = :status WHERE id = :userId
+   * TRIGGER: on_user_suspended -> Invalidate all active sessions.
+   * AUDIT: Logs action to moderation_history table.
    */
   updateUserStatus: async (
     userId: string,
@@ -1174,7 +1281,9 @@ const adminApi = {
   },
 
   /**
-   * Delete user account
+   * Delete user account (GDPR/Enforcement)
+   * SQL: DELETE FROM profiles WHERE id = :userId (Cascades to posts, reactions etc.)
+   * AUDIT: Final log entry before deletion.
    */
   deleteUser: async (userId: string, reason?: string): Promise<void> => {
     requireAdmin();
@@ -1469,9 +1578,9 @@ export const api = {
 
   /**
    * Create a new post
-   * @param post - Post data (content, optional quoted post, optional media)
-   * @returns Newly created post
-   * @throws Error if rate limit exceeded
+   * SQL: INSERT INTO posts (id, author_id, content, ...) VALUES (...)
+   * TRIGGER: on_post_insert -> Increment profile stats, notify mentions, parse hashtags.
+   * EDGE: fan_out_notifications -> Push to all active followers.
    */
   createPost: async (post: { content: string, quotedPostId?: string, media?: Media[] }): Promise<Post> => {
     // Rate limiting
@@ -1513,7 +1622,7 @@ export const api = {
 
     allPosts.unshift(newPost);
 
-    // Process mentions
+    // [TRIGGER] Process mentions
     const mentions = parseMentions(post.content);
     mentions.forEach(username => {
       const recipient = allUsers.find(u => u.username === username);
@@ -1528,13 +1637,13 @@ export const api = {
       }
     });
 
-    // Process hashtags
+    // [TRIGGER] Process hashtags
     const hashtags = parseHashtags(post.content);
     hashtags.forEach(tag => {
       hashtagUsage.set(tag, (hashtagUsage.get(tag) || 0) + 1);
     });
 
-    // Notify quoted post author
+    // [TRIGGER] Notify quoted post author
     if (quotedPost && quotedPost.author.id !== CURRENT_USER_ID) {
       createNotification({
         type: 'QUOTE',
@@ -1545,7 +1654,7 @@ export const api = {
       });
     }
 
-    // Invalidate feed cache
+    // Invalidate feed cache (Simulates Redis cache invalidation)
     feedEngine.invalidateCache(CURRENT_USER_ID);
 
     console.log(`[Post] Created post ${newPost.id}`);
@@ -1553,7 +1662,34 @@ export const api = {
   },
 
   /**
+   * Quote a post with local content
+   * @param quotedPostId - ID of post to quote
+   * @param content - User's comment
+   * @returns Newly created quote post
+   */
+  quote: async (quotedPostId: string, content: string): Promise<Post> => {
+    return api.createPost({ content, quotedPostId });
+  },
+
+  /**
+   * Report a post, user, or message for policy violations
+   * SQL: INSERT INTO reports (reporter_id, victim_id, ...) VALUES (...)
+   * TRIGGER: on_report_insert -> Notify moderators, check for auto-suspension thresholds.
+   * @param targetType - What is being reported
+   * @param targetId - ID of the target
+   * @param type - Type of violation
+   * @param reporterId - Who is reporting
+   * @param reason - Detailed reason
+   */
+  createReport: async (targetType: ReportableEntityType, targetId: string, type: ReportType, reporterId: string, reason: string): Promise<Report> => {
+    return createReportApi(targetType, targetId, type, reporterId, reason);
+  },
+
+  /**
    * Create a new poll
+   * SQL: INSERT INTO posts (id, author_id, content, poll_data, ...) VALUES (...)
+   * TRIGGER: on_post_insert -> Increment profile stats, notify mentions, parse hashtags.
+   * EDGE: fan_out_notifications -> Push to all active followers.
    * @param poll - Poll data (question and choices)
    * @returns Newly created poll post
    */
@@ -1581,7 +1717,9 @@ export const api = {
       content: poll.question,
       poll: {
         choices: poll.choices.map(c => ({ ...c, vote_count: 0 })),
-        question: poll.question
+        question: poll.question,
+        totalVotes: 0,
+        expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24).toISOString() // 24h default
       },
       createdAt: new Date().toISOString(),
       likeCount: 0,
@@ -1638,32 +1776,22 @@ export const api = {
 
   /**
    * Delete a post
+   * RLS: author_id = auth.uid() OR is_admin()
+   * TRIGGER: on_post_delete -> Cleanup associations, decrement stats.
    * @param postId - ID of the post to delete
    * @returns True if deleted successfully
    */
   deletePost: async (postId: string): Promise<boolean> => {
-    const postIndex = allPosts.findIndex(p => p.id === postId);
-    if (postIndex === -1) {
-      throw new Error('Post not found');
-    }
+    const index = allPosts.findIndex(p => p.id === postId);
+    if (index === -1) return false;
 
-    const post = allPosts[postIndex];
-
-    // Only allow author to delete
-    if (post.author.id !== CURRENT_USER_ID) {
-      throw new Error('You can only delete your own posts');
+    const post = allPosts[index];
+    // Only allow author to delete or an admin
+    if (post.author.id !== CURRENT_USER_ID && !isAdmin()) {
+      throw new Error('Not authorized to delete this post');
     }
 
     // Remove from main array
-    allPosts.splice(postIndex, 1);
-
-    // Clean up related data
-    reactionsMap.delete(postId);
-    repostsMap.delete(postId);
-    postViewsMap.delete(postId);
-    pollVotesMap.delete(postId);
-
-    // Remove from bookmarks
     bookmarksMap.forEach(bookmarks => bookmarks.delete(postId));
 
     feedEngine.invalidateCache(CURRENT_USER_ID);
@@ -1678,10 +1806,12 @@ export const api = {
 
   /**
    * Fetch the personalized feed for the current user
-   * @param cursor - Pagination cursor (optional)
-   * @returns Posts and next cursor
+   * SQL: SELECT * FROM posts WHERE author_id IN (following) OR author_id = uid()
+   * RLS: Enforced natively via "Posts visibility" policy.
+   * CACHE: Results are usually hit from a Redis-backed pre-computed "Home Timeline".
    */
   fetchFeed: async (cursor?: string): Promise<{ posts: Post[], nextCursor: string | undefined }> => {
+    // Implementation details...
     let structuredCursor: any = undefined;
     try {
       if (cursor) structuredCursor = JSON.parse(cursor);
@@ -1707,17 +1837,20 @@ export const api = {
 
   /**
    * Get the "For You" algorithmic feed
-   * @param offset - Pagination offset
-   * @returns Array of posts
+   * SQL: Aggregated read-model optimized for high-throughput discovery.
+   * RANKING: Pre-2023 focus was chronological, but "For You" uses calculateEngagementScore().
    */
   getForYouFeed: async (offset = 0): Promise<Post[]> => {
     const pageSize = 10;
     const muted = mutedMap.get(CURRENT_USER_ID) || new Set();
     const blocked = blockedMap.get(CURRENT_USER_ID) || new Set();
 
-    // Filter out muted/blocked users
+    // Filter out muted/blocked users and discovery-restricted content
     const filteredPosts = allPosts.filter(
-      p => !muted.has(p.author.id) && !blocked.has(p.author.id) && !p.parentPostId
+      p => !muted.has(p.author.id) &&
+        !blocked.has(p.author.id) &&
+        !p.author.is_shadow_banned && // Discovery restricted
+        !p.parentPostId
     );
 
     // Sort by engagement score for algorithmic feed
@@ -1786,8 +1919,8 @@ export const api = {
 
   /**
    * Search for posts and users
-   * @param query - Search query string
-   * @returns Matching posts and users
+   * SQL: PostgreSQL FTS (Full Text Search) with GIN indexes on ts_vector columns.
+   * EDGE: Potential offload to Meilisearch or Algolia for typo-tolerance.
    */
   search: async (query: string): Promise<{ posts: Post[], users: User[] }> => {
     if (!query.trim()) {
@@ -1838,8 +1971,8 @@ export const api = {
 
   /**
    * Get trending hashtags
-   * @param limit - Number of trends to return (default 10)
-   * @returns Array of trending hashtags with counts
+   * CRON: Trending scores are recalculated every 10 mins using a time-decay algorithm.
+   * SQL: SELECT tag, count FROM trending_cache ORDER BY score DESC LIMIT :limit
    */
   getTrends: async (limit = 10): Promise<{ hashtag: string, count: number }[]> => {
     return Array.from(hashtagUsage.entries())
@@ -1875,9 +2008,9 @@ export const api = {
 
   /**
    * Create a comment or reply
-   * @param parentId - ID of the parent post or comment
-   * @param commentData - Comment content and optional media
-   * @returns Newly created comment
+   * SQL: INSERT INTO comments (id, parent_id, author_id, content, ...)
+   * TRIGGER: on_comment_insert -> Increment parent.comment_count, notify parent author.
+   * RLS: Enforced same as posts (visibility depends on parent).
    */
   createComment: async (parentId: string, commentData: { content: string, media?: Media[] }): Promise<Comment> => {
     // Rate limiting
@@ -1979,8 +2112,9 @@ export const api = {
 
   /**
    * React to a post (like, dislike, laugh)
-   * @param postId - ID of the post
-   * @param action - Type of reaction
+   * SQL: INSERT INTO reactions (user_id, post_id, type) VALUES (...) ON CONFLICT (user_id, post_id) DO UPDATE SET type = EXCLUDED.type
+   * TRIGGER: on_reaction_change -> Increment/Decrement cached counts on posts table.
+   * RLS: user_id = auth.uid()
    */
   react: async (postId: string, action: ReactionAction) => {
     // Rate limiting
@@ -2024,7 +2158,8 @@ export const api = {
 
   /**
    * Repost or un-repost a post
-   * @param postId - ID of the post to repost
+   * SQL: INSERT INTO reposts (user_id, post_id) VALUES (uid, pid)
+   * TRIGGER: on_repost -> Increment post.repost_count, fan out to followers' Home Timelines.
    */
   repost: async (postId: string) => {
     // Rate limiting
@@ -2145,8 +2280,12 @@ export const api = {
    * @param username - Username to search for
    * @returns User or undefined
    */
-  fetchUser: async (username: string): Promise<User | undefined> => {
-    return allUsers.find(u => u.username.toLowerCase() === username.toLowerCase());
+  fetchUser: async (identifier: string): Promise<User | undefined> => {
+    // Try by ID first, then by username
+    const userById = userMap.get(identifier);
+    if (userById) return userById;
+
+    return allUsers.find(u => u.username.toLowerCase() === identifier.toLowerCase());
   },
 
   /**
@@ -2288,8 +2427,9 @@ export const api = {
 
   /**
    * Follow or unfollow a user
-   * @param targetUserId - User ID to follow/unfollow
-   * @returns True if now following, false if unfollowed
+   * SQL: INSERT INTO follows (follower_id, following_id) VALUES (uid, target) ON CONFLICT DO DELETE
+   * TRIGGER: on_follow_change -> Update scores in profiles table.
+   * RLS: follower_id = auth.uid()
    */
   toggleFollow: async (targetUserId: string): Promise<boolean> => {
     // Rate limiting
@@ -2364,8 +2504,8 @@ export const api = {
 
   /**
    * Mute or unmute a user
-   * @param targetUserId - User ID to mute/unmute
-   * @returns True if now muted, false if unmuted
+   * SQL: INSERT INTO mutes (user_id, muted_id) VALUES (uid, target) ON CONFLICT DO DELETE
+   * RLS: user_id = auth.uid()
    */
   toggleMute: async (targetUserId: string): Promise<boolean> => {
     const targetUser = userMap.get(targetUserId);
@@ -2412,8 +2552,9 @@ export const api = {
 
   /**
    * Block or unblock a user
-   * @param targetUserId - User ID to block/unblock
-   * @returns True if now blocked, false if unblocked
+   * SQL: INSERT INTO blocks (user_id, blocked_id) VALUES (uid, target) ON CONFLICT DO DELETE
+   * TRIGGER: on_block -> Automatically unfollow both ways.
+   * RLS: user_id = auth.uid()
    */
   toggleBlock: async (targetUserId: string): Promise<boolean> => {
     const targetUser = userMap.get(targetUserId);
@@ -2525,8 +2666,8 @@ export const api = {
 
   /**
    * Fetch notifications for current user
-   * @param limit - Maximum number of notifications to return
-   * @returns Array of notifications
+   * SQL: SELECT * FROM notifications WHERE recipient_id = auth.uid()
+   * RLS: recipient_id = auth.uid()
    */
   fetchNotifications: async (limit = 50): Promise<Notification[]> => {
     const userNotifications = allNotifications.filter(
@@ -2607,6 +2748,21 @@ export const api = {
   },
 
   /**
+   * Toggle pin status for a conversation
+   * @param conversationId - Conversation ID
+   * @param pinned - Whether to pin or unpin
+   */
+  pinConversation: async (conversationId: string, pinned: boolean): Promise<void> => {
+    const conversation = mockConversations.find(c => c.id === conversationId);
+    if (!conversation) {
+      throw new Error('Conversation not found');
+    }
+
+    conversation.isPinned = pinned;
+    console.log(`[Conversation] ${pinned ? 'Pinned' : 'Unpinned'} conversation ${conversationId}`);
+  },
+
+  /**
    * Get a specific conversation by ID
    * @param conversationId - Conversation ID
    * @returns Conversation with messages
@@ -2631,10 +2787,19 @@ export const api = {
   },
 
   /**
-   * Send a message in a conversation
+   * Get messages for a conversation
    * @param conversationId - Conversation ID
-   * @param message - Message text
-   * @returns Sent message
+   * @returns Array of messages
+   */
+  getMessages: async (conversationId: string): Promise<Message[]> => {
+    return mockMessages[conversationId] || [];
+  },
+
+  /**
+   * Send a message in a conversation
+   * SQL: INSERT INTO messages (conversation_id, sender_id, text) VALUES (...)
+   * TRIGGER: on_message_insert -> Update conversation.last_message, notify participants.
+   * REALTIME: Broadcasts via WAL (Write Ahead Log) to subscribed clients.
    */
   sendMessage: async (conversationId: string, message: string): Promise<Message> => {
     // Rate limiting
@@ -2687,8 +2852,54 @@ export const api = {
       }
     });
 
+    // Notify listeners via EventEmitter
+    eventEmitter.emit('newMessage', { conversationId, message: newMessage });
+
     console.log(`[Message] Sent message in conversation ${conversationId}`);
     return newMessage;
+  },
+
+  /**
+   * Add a reaction to a message
+   * @param conversationId - Conversation ID (not strictly needed but for safety)
+   * @param messageId - Message ID
+   * @param emoji - Emoji string
+   */
+  addReaction: async (conversationId: string, messageId: string, emoji: string): Promise<void> => {
+    const messages = mockMessages[conversationId];
+    if (!messages) throw new Error('Conversation not found');
+
+    const message = messages.find(m => m.id === messageId);
+    if (!message) throw new Error('Message not found');
+
+    if (!message.reactions) message.reactions = {};
+    message.reactions[emoji] = (message.reactions[emoji] || 0) + 1;
+
+    // Notify via event emitter
+    eventEmitter.emit('newMessage', { conversationId, message });
+
+    console.log(`[Message] Reacted ${emoji} to msg ${messageId}`);
+  },
+
+  /**
+   * Pin a message in a conversation
+   * @param conversationId - Conversation ID
+   * @param messageId - Message ID
+   */
+  pinMessage: async (conversationId: string, messageId: string): Promise<void> => {
+    const conversation = mockConversations.find(c => c.id === conversationId);
+    if (!conversation) throw new Error('Conversation not found');
+
+    // Toggle logic
+    conversation.pinnedMessageId = conversation.pinnedMessageId === messageId ? undefined : messageId;
+
+    // Create system message about pinning
+    if (conversation.pinnedMessageId) {
+      const msg = await api.sendMessage(conversationId, `A message was pinned to the conversation.`);
+      msg.type = 'SYSTEM';
+    }
+
+    console.log(`[Message] Toggled pin for msg ${messageId} in conv ${conversationId}`);
   },
 
   /**
@@ -2788,6 +2999,7 @@ export const api = {
       unreadCount: 0,
       type: 'GROUP',
       ownerId: CURRENT_USER_ID,
+      adminIds: [CURRENT_USER_ID],
       description,
     };
 
@@ -2806,6 +3018,207 @@ export const api = {
 
     console.log(`[Conversation] Created group "${name}" with ${participants.length} participants`);
     return newConversation;
+  },
+
+  /**
+   * Create a new channel conversation
+   * @param name - Channel name
+   * @param description - Optional channel description
+   * @returns New channel conversation
+   */
+  createChannelConversation: async (
+    name: string,
+    description?: string
+  ): Promise<Conversation> => {
+    // Create channel conversation
+    const newConversation: Conversation = {
+      id: `channel-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      name,
+      participants: [userMap.get(CURRENT_USER_ID)!], // Start with just the owner
+      lastMessage: {
+        id: `sys-msg-${Date.now()}`,
+        senderId: CURRENT_USER_ID,
+        text: `Channel "${name}" was created`,
+        createdAt: new Date().toISOString(),
+        type: 'SYSTEM',
+      },
+      unreadCount: 0,
+      type: 'CHANNEL',
+      ownerId: CURRENT_USER_ID,
+      adminIds: [CURRENT_USER_ID],
+      description,
+    };
+
+    mockConversations.unshift(newConversation);
+    mockMessages[newConversation.id] = [
+      {
+        id: newConversation.lastMessage?.id || `sys-${Date.now()}`,
+        senderId: CURRENT_USER_ID,
+        text: newConversation.lastMessage?.text || '',
+        createdAt: new Date().toISOString(),
+        type: 'SYSTEM',
+      }
+    ];
+
+    console.log(`[Conversation] Created channel "${name}"`);
+    return newConversation;
+  },
+
+  promoteToAdmin: async (conversationId: string, userId: string): Promise<void> => {
+    const conv = mockConversations.find(c => c.id === conversationId);
+    if (!conv) throw new Error('Conversation not found');
+    if (!conv.adminIds) conv.adminIds = [conv.ownerId!];
+    if (!conv.adminIds.includes(userId)) {
+      conv.adminIds.push(userId);
+      eventEmitter.emit('conversationUpdated', { conversationId, updates: { adminIds: conv.adminIds } });
+    }
+  },
+
+  demoteFromAdmin: async (conversationId: string, userId: string): Promise<void> => {
+    const conv = mockConversations.find(c => c.id === conversationId);
+    if (!conv) throw new Error('Conversation not found');
+    if (conv.ownerId === userId) throw new Error('Cannot demote the owner');
+    if (conv.adminIds) {
+      conv.adminIds = conv.adminIds.filter(id => id !== userId);
+      eventEmitter.emit('conversationUpdated', { conversationId, updates: { adminIds: conv.adminIds } });
+    }
+  },
+
+  removeFromConversation: async (conversationId: string, userId: string): Promise<void> => {
+    const conv = mockConversations.find(c => c.id === conversationId);
+    if (!conv) throw new Error('Conversation not found');
+    if (conv.ownerId === userId) throw new Error('Cannot remove the owner');
+    conv.participants = conv.participants.filter(p => p.id !== userId);
+    if (conv.adminIds) {
+      conv.adminIds = conv.adminIds.filter(id => id !== userId);
+    }
+    eventEmitter.emit('conversationUpdated', { conversationId, updates: { participants: conv.participants, adminIds: conv.adminIds } });
+  },
+
+  leaveConversation: async (conversationId: string): Promise<void> => {
+    const conv = mockConversations.find(c => c.id === conversationId);
+    if (!conv) throw new Error('Conversation not found');
+    if (conv.ownerId === CURRENT_USER_ID) throw new Error('Owner cannot leave. Delete the conversation instead.');
+    conv.participants = conv.participants.filter(p => p.id !== CURRENT_USER_ID);
+    if (conv.adminIds) {
+      conv.adminIds = conv.adminIds.filter(id => id !== CURRENT_USER_ID);
+    }
+    eventEmitter.emit('conversationUpdated', { conversationId, updates: { participants: conv.participants, adminIds: conv.adminIds } });
+  },
+
+  updateConversation: async (conversationId: string, updates: Partial<Conversation>): Promise<void> => {
+    const index = mockConversations.findIndex(c => c.id === conversationId);
+    if (index === -1) throw new Error('Conversation not found');
+    mockConversations[index] = { ...mockConversations[index], ...updates };
+    eventEmitter.emit('conversationUpdated', { conversationId, updates });
+  },
+
+  deleteConversation: async (conversationId: string): Promise<void> => {
+    const index = mockConversations.findIndex(c => c.id === conversationId);
+    if (index === -1) throw new Error('Conversation not found');
+    mockConversations.splice(index, 1);
+    delete mockMessages[conversationId];
+    eventEmitter.emit('conversationDeleted', conversationId);
+  },
+
+  // ---------------------------------------------------------------------------
+  // LISTS MANAGEMENT
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Create a new user list
+   * @param list - List details
+   * @returns Newly created list
+   */
+  createList: async (list: Omit<PostrList, 'id' | 'createdAt' | 'memberIds' | 'subscriberIds'>): Promise<PostrList> => {
+    const newList: PostrList = {
+      ...list,
+      id: `list-${Date.now()}`,
+      memberIds: [],
+      subscriberIds: [CURRENT_USER_ID], // Owner is first subscriber
+      createdAt: new Date().toISOString()
+    };
+    allLists.push(newList);
+    console.log(`[Lists] Created list: ${newList.name}`);
+    return newList;
+  },
+
+  /**
+   * Fetch lists for a user (owned, member of, or subscribed to)
+   * @param userId - User ID
+   * @returns Array of lists
+   */
+  fetchLists: async (userId: string = CURRENT_USER_ID): Promise<PostrList[]> => {
+    return allLists.filter(list =>
+      list.ownerId === userId ||
+      list.memberIds.includes(userId) ||
+      list.subscriberIds.includes(userId)
+    );
+  },
+
+  /**
+   * Add a member to a list
+   * @param listId - List ID
+   * @param userId - User to add
+   */
+  addMemberToList: async (listId: string, userId: string): Promise<void> => {
+    const list = allLists.find(l => l.id === listId);
+    if (!list) throw new Error('List not found');
+    if (list.ownerId !== CURRENT_USER_ID) throw new Error('Unauthorized');
+
+    if (!list.memberIds.includes(userId)) {
+      list.memberIds.push(userId);
+      console.log(`[Lists] Added user ${userId} to list ${listId}`);
+    }
+  },
+
+  /**
+   * Remove a member from a list
+   * @param listId - List ID
+   * @param userId - User to remove
+   */
+  removeMemberFromList: async (listId: string, userId: string): Promise<void> => {
+    const list = allLists.find(l => l.id === listId);
+    if (!list) throw new Error('List not found');
+    if (list.ownerId !== CURRENT_USER_ID) throw new Error('Unauthorized');
+
+    list.memberIds = list.memberIds.filter(id => id !== userId);
+    console.log(`[Lists] Removed user ${userId} from list ${listId}`);
+  },
+
+  /**
+   * Subscribe to or unsubscribe from a list
+   * @param listId - List ID
+   * @returns Updated subscription status
+   */
+  toggleListSubscription: async (listId: string): Promise<boolean> => {
+    const list = allLists.find(l => l.id === listId);
+    if (!list) throw new Error('List not found');
+
+    const index = list.subscriberIds.indexOf(CURRENT_USER_ID);
+    if (index !== -1) {
+      list.subscriberIds.splice(index, 1);
+      return false;
+    } else {
+      list.subscriberIds.push(CURRENT_USER_ID);
+      return true;
+    }
+  },
+
+  /**
+   * Get posts from members of a list
+   * @param listId - List ID
+   * @returns Array of posts
+   */
+  getListPosts: async (listId: string): Promise<Post[]> => {
+    const list = allLists.find(l => l.id === listId);
+    if (!list) throw new Error('List not found');
+
+    const memberSet = new Set(list.memberIds);
+    return allPosts
+      .filter(p => memberSet.has(p.author.id) && !p.parentPostId)
+      .slice(0, 50)
+      .map(p => hydratePost(p));
   },
 
   // ---------------------------------------------------------------------------
@@ -3126,7 +3539,35 @@ export const api = {
   // ADMIN ENDPOINTS
   // ---------------------------------------------------------------------------
 
-  admin: adminApi
+  admin: adminApi,
+
+  /**
+   * Set the current authenticated user session
+   * @param userId - ID of the user from auth provider
+   */
+  setSessionUser: (userId: string) => {
+    CURRENT_USER_ID = userId;
+    console.log(`[API] Session user updated to: ${userId}`);
+
+    // If user doesn't exist in mock data, create a placeholder
+    if (!userMap.has(userId)) {
+      const newUser: User = {
+        id: userId,
+        name: 'Postr User',
+        username: `user_${userId.substring(0, 6).toLowerCase()}`,
+        avatar: `https://i.pravatar.cc/150?u=${userId}`,
+        bio: 'Just joined Postr! 🚀',
+        is_active: true,
+        is_limited: false,
+        is_shadow_banned: false,
+        is_suspended: false,
+        is_muted: false
+      };
+      allUsers.push(newUser);
+      userMap.set(userId, newUser);
+      console.log(`[API] Created placeholder profile for new session user: ${userId}`);
+    }
+  },
 };
 
 // =============================================================================

@@ -20,6 +20,7 @@ export interface Conversation {
     name?: string;
     description?: string;
     ownerId?: string;
+    adminIds?: string[];
     isPinned?: boolean;
     pinnedMessageId?: string;
 }

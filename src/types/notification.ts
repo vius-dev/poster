@@ -11,6 +11,7 @@ export interface Notification {
     recipientId: string;
     postId?: string;
     postSnippet?: string;
+    post?: Post;
     createdAt: string;
     isRead: boolean;
 }

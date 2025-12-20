@@ -5,6 +5,7 @@ import { Conversation } from '@/types/message';
 import { useTheme } from '@/theme/theme';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { CURRENT_USER_ID } from '@/lib/api';
 
 interface ConversationItemProps {
     conversation: Conversation;
@@ -45,7 +46,7 @@ export default function ConversationItem({ conversation, onLongPress }: Conversa
 
     const getName = () => {
         if (conversation.type === 'DM') {
-            const otherUser = conversation.participants.find(p => p.id !== '0') || conversation.participants[0];
+            const otherUser = conversation.participants.find(p => p.id !== CURRENT_USER_ID) || conversation.participants[0];
             return (
                 <Text style={[styles.name, { color: theme.textPrimary }]} numberOfLines={1}>
                     {otherUser.name}

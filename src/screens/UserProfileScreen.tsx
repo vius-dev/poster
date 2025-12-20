@@ -27,6 +27,9 @@ const mockPosts: Post[] = [
       name: 'Dev Team',
       username: 'devteam',
       avatar: 'https://i.pravatar.cc/150?u=devteam',
+      is_suspended: false,
+      is_shadow_banned: false,
+      is_limited: false,
     },
     likeCount: 0,
     dislikeCount: 0,
@@ -45,6 +48,9 @@ const mockPosts: Post[] = [
       name: 'Dev Team',
       username: 'devteam',
       avatar: 'https://i.pravatar.cc/150?u=devteam',
+      is_suspended: false,
+      is_shadow_banned: false,
+      is_limited: false,
     },
     likeCount: 0,
     dislikeCount: 0,
@@ -251,7 +257,7 @@ export default function UserProfileScreen() {
                 onFollow={handleFollow}
                 onUnfollow={handleUnfollow}
                 onEditProfile={() => router.push('/edit')}
-                onSettings={() => console.log('Settings pressed')} // Placeholder for settings navigation
+                onSettings={() => router.push('/(settings)/settings')}
                 isLoading={isFollowingLoading}
                 style={{ paddingHorizontal: 0 }}
               />
