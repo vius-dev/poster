@@ -168,13 +168,13 @@ const styles = StyleSheet.create({
   percentageText: {
     fontSize: 14,
     fontWeight: '600',
-    marginLeft: 4,
+    marginRight: 20,
   },
   checkIcon: {
     marginRight: 4,
   },
   footer: {
-    marginTop: 4,
+    marginTop: 2,
   },
   footerText: {
     fontSize: 13,

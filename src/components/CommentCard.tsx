@@ -79,8 +79,9 @@ const CommentCard = ({ comment: initialComment, indentationLevel }: CommentCardP
 
 
   const clampedIndentation = Math.min(indentationLevel, MAX_INDENT_LEVEL);
+  const basePadding = 15;
   const indentationStyle = {
-    paddingLeft: clampedIndentation * INDENT_UNIT,
+    paddingLeft: basePadding + (clampedIndentation * INDENT_UNIT),
   };
 
   const goToPost = () => {
@@ -90,7 +91,7 @@ const CommentCard = ({ comment: initialComment, indentationLevel }: CommentCardP
   return (
     <View style={[styles.container, indentationStyle, { borderBottomColor: theme.borderLight }]}>
       {indentationLevel > 1 && (
-        <View style={[styles.threadLine, { left: clampedIndentation * INDENT_UNIT + 20, backgroundColor: theme.border }]} />
+        <View style={[styles.threadLine, { left: basePadding + (clampedIndentation * INDENT_UNIT) + 20, backgroundColor: theme.border }]} />
       )}
       <TouchableOpacity onPress={goToProfile} activeOpacity={0.7}>
         <Image source={{ uri: initialComment.author.avatar }} style={styles.avatar} />
@@ -149,7 +150,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    marginRight: 10,
+    marginRight: 6,
   },
   contentContainer: {
     flex: 1,

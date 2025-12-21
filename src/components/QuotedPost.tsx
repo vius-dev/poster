@@ -4,7 +4,6 @@ import { View, Text, StyleSheet, Pressable, Image } from 'react-native';
 import { Post } from '@/types/post';
 import { useTheme } from '@/theme/theme';
 import { useRouter } from 'expo-router';
-
 import MediaGrid from './MediaGrid';
 import PollView from '@/components/PollView';
 
@@ -56,13 +55,13 @@ const styles = StyleSheet.create({
   container: {
     borderWidth: 1,
     borderRadius: 10,
-    padding: 5,
-    marginTop: 10,
+    padding: 10,
+    marginTop: 2,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 5,
+    marginBottom: 2,
   },
   authorContainer: {
     flexDirection: 'row',
@@ -83,6 +82,7 @@ const styles = StyleSheet.create({
     marginRight: 5,
   },
   timestamp: {
+    marginRight: 8,
   },
 });
 

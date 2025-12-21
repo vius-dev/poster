@@ -64,16 +64,16 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   header: {
-    marginBottom: 10,
+    marginBottom: 2,
   },
   content: {
-    marginBottom: 10,
+    marginBottom: 2,
   },
   actions: {
-    marginTop: 10,
+    marginTop: 2,
   },
   footer: {
-    marginTop: 10,
+    marginTop: 2,
   },
 });
 

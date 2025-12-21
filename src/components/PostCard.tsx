@@ -206,7 +206,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 20,
-    marginRight: 12,
+    marginRight: 6,
   },
   mainContent: {
     flex: 1,
@@ -214,7 +214,7 @@ const styles = StyleSheet.create({
   repostContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   repostText: {
     marginLeft: 6,
@@ -249,7 +249,7 @@ const styles = StyleSheet.create({
   content: {
     fontSize: 15,
     lineHeight: 22,
-    marginBottom: 8,
+    marginBottom: 4,
   },
   mention: {
     fontWeight: 'bold',

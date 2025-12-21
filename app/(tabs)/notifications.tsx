@@ -100,7 +100,7 @@ export default function NotificationsScreen() {
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
-              {activeTab === 'ALL' ? 'Nothing to see here — yet.' : 'When someone mentions you, you’ll find it here.'}
+              {activeTab === 'ALL' ? 'Nothing to see here.' : 'When someone mentions you, you’ll find it here.'}
             </Text>
           </View>
         }

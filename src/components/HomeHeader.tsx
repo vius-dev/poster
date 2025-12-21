@@ -7,7 +7,7 @@ const HomeHeader = () => {
   const { theme } = useTheme();
   return (
     <View style={[styles.header, { backgroundColor: theme.background }]}>
-      <Text style={[styles.headerTitle, { color: theme.textPrimary }]}>Home</Text>
+      <Text style={[styles.headerTitle, { color: theme.textPrimary }]}>Timeline</Text>
     </View>
   );
 };
