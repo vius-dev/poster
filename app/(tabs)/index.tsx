@@ -8,6 +8,7 @@ import { Post } from '@/types/post';
 import { useTheme } from '@/theme/theme';
 import HomeHeader from '@/components/HomeHeader';
 import { eventEmitter } from '@/lib/EventEmitter';
+import { useResponsive } from '@/hooks/useResponsive';
 
 export default function FeedScreen() {
   const [posts, setPosts] = useState<Post[]>([]);
@@ -51,16 +52,20 @@ export default function FeedScreen() {
     }
   };
 
+  const { isDesktop, isTablet, isWeb } = useResponsive();
+
   if (loading && posts.length === 0) {
     return (
-      <SafeAreaView style={[styles.centered, { backgroundColor: theme.background }]}>
+      <View style={[styles.centered, { backgroundColor: theme.background }]}>
         <ActivityIndicator size="large" color={theme.primary} />
-      </SafeAreaView>
+      </View>
     );
   }
 
+  const Container = isWeb ? View : SafeAreaView;
+
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
+    <Container style={[styles.container, { backgroundColor: theme.background }]}>
       <HomeHeader />
       <FeedList
         posts={posts}
@@ -69,7 +74,7 @@ export default function FeedScreen() {
         refreshing={loading}
       />
       <FAB />
-    </SafeAreaView>
+    </Container>
   );
 }
 

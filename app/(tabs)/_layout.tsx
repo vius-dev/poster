@@ -3,9 +3,13 @@ import React from 'react';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/theme/theme';
+import { useResponsive } from '@/hooks/useResponsive';
 
 export default function TabsLayout() {
   const { theme } = useTheme();
+  const { isDesktop, isTablet, isWeb } = useResponsive();
+
+  const showMobileTabs = !isWeb || (!isDesktop && !isTablet);
 
   return (
     <Tabs
@@ -17,6 +21,7 @@ export default function TabsLayout() {
           backgroundColor: theme.background,
           borderTopColor: theme.border,
           borderTopWidth: 1,
+          display: showMobileTabs ? 'flex' : 'none',
         },
       }}
     >
