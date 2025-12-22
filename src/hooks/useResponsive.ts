@@ -26,5 +26,6 @@ export const useResponsive = () => {
         showSidebar,
         showWidgets,
         isWeb: Platform.OS === 'web',
+        isHandset: isMobile, // alias for isMobile
     };
 };

@@ -166,6 +166,9 @@ const ComposeScreen = () => {
             <TouchableOpacity style={styles.iconButton}>
               <Ionicons name="happy-outline" size={24} color={theme.link} />
             </TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push('/(modals)/poll')} style={styles.iconButton}>
+                <Ionicons name="stats-chart-outline" size={24} color={theme.link} />
+            </TouchableOpacity>
           </View>
           <Text style={[styles.charCount, { color: characterCount > MAX_CHARACTERS ? theme.error : theme.textTertiary }]}>
             {characterCount > 0 ? `${characterCount}/${MAX_CHARACTERS}` : ''}

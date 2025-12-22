@@ -1,6 +1,6 @@
 
 import { Stack } from 'expo-router';
-import { useTheme } from '@/theme/theme';
+import { ThemeProvider, useTheme } from '@/theme/theme';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useEffect } from 'react';
 import { realtimeCoordinator } from '@/realtime/RealtimeCoordinator';
@@ -9,11 +9,12 @@ import { useAuthStore } from '@/state/auth';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { AuthProvider } from '@/providers/AuthProvider';
 import { ResponsiveLayout } from '@/components/layout/ResponsiveLayout';
+import { useLoadAssets } from '@/hooks/useLoadAssets';
 
-
-export default function AppLayout() {
+function RootLayoutNav() {
   const { theme } = useTheme();
-  const { isAuthenticated, isLoading, initialize } = useAuthStore();
+  const { isAuthenticated, isLoading: isAuthLoading, initialize } = useAuthStore();
+  const isLoadingAssets = useLoadAssets();
 
   // Initialize auth session on mount
   useEffect(() => {
@@ -29,7 +30,7 @@ export default function AppLayout() {
   }, []);
 
   // Show loading screen while determining auth state
-  if (isLoading) {
+  if (isAuthLoading || isLoadingAssets) {
     return (
       <SafeAreaProvider>
         <View style={[styles.loadingContainer, { backgroundColor: theme.background }]}>
@@ -101,6 +102,14 @@ export default function AppLayout() {
         </SafeAreaProvider>
       </RealtimeProvider>
     </AuthProvider>
+  );
+}
+
+export default function AppLayout() {
+  return (
+    <ThemeProvider>
+      <RootLayoutNav />
+    </ThemeProvider>
   );
 }
 

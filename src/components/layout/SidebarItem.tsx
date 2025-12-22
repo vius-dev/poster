@@ -9,46 +9,40 @@ interface SidebarItemProps {
     label: string;
     icon: keyof typeof Ionicons.glyphMap;
     href: string;
-    compact?: boolean;
+    horizontal?: boolean;
+    hideLabel?: boolean;
 }
 
-export const SidebarItem = ({ label, icon, href, compact }: SidebarItemProps) => {
+export const SidebarItem = ({ label, icon, href, horizontal, hideLabel }: SidebarItemProps) => {
     const { theme } = useTheme();
     const router = useRouter();
     const pathname = usePathname();
 
-    // Check if current path matches href 
     const isActive = pathname === href || (href !== '/' && pathname.startsWith(href));
 
     return (
         <TouchableOpacity
             style={[
                 styles.container,
-                isActive && {
-                    backgroundColor: theme.surfaceHover,
-                    shadowColor: theme.primary,
-                    shadowOffset: { width: 0, height: 0 },
-                    shadowOpacity: 0.4,
-                    shadowRadius: 10,
-                    elevation: 5
-                },
-                compact && styles.compactContainer
+                horizontal && styles.horizontalContainer,
+                isActive && (horizontal ? { backgroundColor: theme.primary } : styles.activeVertical),
             ]}
             onPress={() => router.push(href as any)}
             activeOpacity={0.7}
         >
-            <View style={styles.content}>
+            <View style={[styles.content, horizontal && styles.horizontalContent]}>
                 <Ionicons
                     name={isActive ? icon : `${icon}-outline` as any}
-                    size={28}
-                    color={isActive ? theme.primary : theme.textPrimary}
+                    size={horizontal ? 24 : 28}
+                    color={isActive ? (horizontal ? theme.textInverse : theme.primary) : theme.textPrimary}
                 />
-                {!compact && (
+                {!hideLabel && (
                     <Text
                         style={[
                             styles.label,
-                            { color: isActive ? theme.primary : theme.textPrimary },
-                            isActive && { color: theme.primary, fontWeight: '800' }
+                            horizontal && styles.horizontalLabel,
+                            { color: isActive ? (horizontal ? theme.textInverse : theme.primary) : theme.textPrimary },
+                            isActive && { fontWeight: 'bold' },
                         ]}
                     >
                         {label}
@@ -63,22 +57,35 @@ const styles = StyleSheet.create({
     container: {
         paddingVertical: 12,
         paddingHorizontal: 20,
-        borderRadius: 15, // Softer rounding
+        borderRadius: 15,
         marginVertical: 4,
         alignSelf: 'center',
-        width: '90%', // Fill the dock mostly
+        width: '90%',
     },
-    compactContainer: {
-        alignSelf: 'center',
-        paddingHorizontal: 12,
+    horizontalContainer: {
+        paddingVertical: 8,
+        paddingHorizontal: 16,
+        marginVertical: 0,
+        width: 'auto',
+        borderRadius: 30,
+    },
+    activeVertical: {
+        backgroundColor: '#E7F5FD',
     },
     content: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: 15,
     },
+    horizontalContent: {
+        gap: 8,
+    },
     label: {
         fontSize: 19,
         marginRight: 10,
+    },
+    horizontalLabel: {
+        fontSize: 15,
+        marginRight: 0,
     },
 });
