@@ -60,6 +60,7 @@ const SettingsScreen = () => {
     const { theme } = useTheme();
     const router = useRouter();
     const logout = useAuthStore(state => state.logout);
+    const user = useAuthStore(state => state.user);
 
     const handleLogout = () => {
         Alert.alert(
@@ -84,6 +85,12 @@ const SettingsScreen = () => {
             <ScrollView>
                 <View style={styles.section}>
                     <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>Account</Text>
+                    <SettingsItem
+                        icon="at-outline"
+                        title="Username"
+                        subtitle={`@${user?.username}`}
+                        onPress={() => router.push('/(settings)/username')}
+                    />
                     <SettingsItem
                         icon="person-outline"
                         title="Your account"

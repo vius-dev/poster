@@ -1,52 +1,56 @@
-
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useCallback,
+} from 'react';
 import { eventEmitter } from '@/lib/EventEmitter';
 import { api } from '@/lib/api';
 import { ReactionAction } from '@/types/post';
 
+interface PostCounts {
+  likes: number;
+  dislikes: number;
+  laughs: number;
+  reposts: number;
+  comments: number;
+}
+
 interface RealtimeState {
-  counts: {
-    [postId: string]: {
-      likes: number;
-      dislikes: number;
-      laughs: number;
-      reposts: number;
-      comments: number;
-    };
-  };
-  userReactions: {
-    [postId: string]: ReactionAction;
-  };
-  userReposts: {
-    [postId: string]: boolean;
-  };
-  userBookmarks: {
-    [postId: string]: boolean;
-  };
+  counts: Record<string, PostCounts>;
+  userReactions: Record<string, ReactionAction>;
+  userReposts: Record<string, boolean>;
+  userBookmarks: Record<string, boolean>;
+}
+
+interface PostInitializationData extends PostCounts {
+  userReaction: ReactionAction;
+  isReposted: boolean;
+  isBookmarked: boolean;
 }
 
 interface RealtimeContextType extends RealtimeState {
-  setCounts: (postId: string, updates: Partial<RealtimeState['counts'][string]>) => void;
-  initializePost: (postId: string, initial: {
-    likes: number;
-    dislikes: number;
-    laughs: number;
-    reposts: number;
-    comments: number;
-    userReaction: ReactionAction;
-    isReposted: boolean;
-    isBookmarked: boolean;
-  }) => void;
+  setCounts: (postId: string, updates: Partial<PostCounts>) => void;
+  initializePost: (postId: string, initial: PostInitializationData) => void;
   toggleReaction: (postId: string, action: ReactionAction) => Promise<void>;
   toggleRepost: (postId: string) => Promise<void>;
   toggleBookmark: (postId: string) => Promise<void>;
 }
 
-const RealtimeContext = createContext<RealtimeContextType | undefined>(
-  undefined
-);
+const RealtimeContext = createContext<RealtimeContextType | undefined>(undefined);
 
-export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+const DEFAULT_COUNTS: PostCounts = {
+  likes: 0,
+  dislikes: 0,
+  laughs: 0,
+  reposts: 0,
+  comments: 0,
+};
+
+export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
   const [state, setState] = useState<RealtimeState>({
     counts: {},
     userReactions: {},
@@ -54,149 +58,236 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     userBookmarks: {},
   });
 
-  const setCounts = (postId: string, updates: Partial<RealtimeState['counts'][string]>) => {
-    setState((prevState) => ({
-      ...prevState,
-      counts: {
-        ...prevState.counts,
-        [postId]: {
-          ...(prevState.counts[postId] || { likes: 0, dislikes: 0, laughs: 0, reposts: 0, comments: 0 }),
-          ...updates,
-        },
-      },
-    }));
-  };
-
-  const initializePost = (postId: string, initial: {
-    likes: number;
-    dislikes: number;
-    laughs: number;
-    reposts: number;
-    comments: number;
-    userReaction: ReactionAction;
-    isReposted: boolean;
-    isBookmarked: boolean;
-  }) => {
-    setState((prevState) => {
-      if (prevState.counts[postId]) return prevState; // Don't overwrite existing dynamic state
-      return {
-        ...prevState,
+  const setCounts = useCallback(
+    (postId: string, updates: Partial<PostCounts>) => {
+      setState(prev => ({
+        ...prev,
         counts: {
-          ...prevState.counts,
+          ...prev.counts,
           [postId]: {
-            likes: initial.likes,
-            dislikes: initial.dislikes,
-            laughs: initial.laughs,
-            reposts: initial.reposts,
-            comments: initial.comments,
+            ...(prev.counts[postId] || { ...DEFAULT_COUNTS }),
+            ...updates,
           },
         },
+      }));
+    },
+    []
+  );
+
+  const initializePost = useCallback(
+    (postId: string, initial: PostInitializationData) => {
+      setState(prev => {
+        if (
+          prev.counts[postId] &&
+          prev.userReactions[postId] !== undefined
+        ) {
+          return prev;
+        }
+
+        return {
+          ...prev,
+          counts: {
+            ...prev.counts,
+            [postId]: {
+              likes: initial.likes,
+              dislikes: initial.dislikes,
+              laughs: initial.laughs,
+              reposts: initial.reposts,
+              comments: initial.comments,
+            },
+          },
+          userReactions: {
+            ...prev.userReactions,
+            [postId]: initial.userReaction,
+          },
+          userReposts: {
+            ...prev.userReposts,
+            [postId]: initial.isReposted,
+          },
+          userBookmarks: {
+            ...prev.userBookmarks,
+            [postId]: initial.isBookmarked,
+          },
+        };
+      });
+    },
+    []
+  );
+
+  const toggleReaction = useCallback(async (postId: string, action: ReactionAction) => {
+    let rollback:
+      | { reaction: ReactionAction; counts: PostCounts }
+      | null = null;
+
+    setState(prev => {
+      const currentReaction = prev.userReactions[postId] || 'NONE';
+      const nextReaction =
+        currentReaction === action ? 'NONE' : action;
+
+      const currentCounts = prev.counts[postId] || {
+        ...DEFAULT_COUNTS,
+      };
+      const newCounts = { ...currentCounts };
+
+      rollback = {
+        reaction: currentReaction,
+        counts: currentCounts,
+      };
+
+      if (currentReaction !== 'NONE') {
+        const key =
+          `${currentReaction.toLowerCase()}s` as keyof PostCounts;
+        newCounts[key] = Math.max(0, newCounts[key] - 1);
+      }
+
+      if (nextReaction !== 'NONE') {
+        const key =
+          `${nextReaction.toLowerCase()}s` as keyof PostCounts;
+        newCounts[key] += 1;
+      }
+
+      return {
+        ...prev,
+        counts: { ...prev.counts, [postId]: newCounts },
         userReactions: {
-          ...prevState.userReactions,
-          [postId]: initial.userReaction,
-        },
-        userReposts: {
-          ...prevState.userReposts,
-          [postId]: initial.isReposted,
-        },
-        userBookmarks: {
-          ...prevState.userBookmarks,
-          [postId]: initial.isBookmarked,
+          ...prev.userReactions,
+          [postId]: nextReaction,
         },
       };
     });
-  };
-
-  const toggleReaction = async (postId: string, action: ReactionAction) => {
-    const currentReaction = state.userReactions[postId] || 'NONE';
-    const nextReaction = currentReaction === action ? 'NONE' : action;
-
-    // Optimistic Update
-    const currentPostCounts = state.counts[postId] || { likes: 0, dislikes: 0, laughs: 0, reposts: 0, comments: 0 };
-    const newCounts = { ...currentPostCounts };
-
-    if (currentReaction !== 'NONE') {
-      const key = (currentReaction.toLowerCase() + 's') as keyof typeof newCounts;
-      if (typeof newCounts[key] === 'number') (newCounts[key] as number)--;
-    }
-
-    if (nextReaction !== 'NONE') {
-      const key = (nextReaction.toLowerCase() + 's') as keyof typeof newCounts;
-      if (typeof newCounts[key] === 'number') (newCounts[key] as number)++;
-    }
-
-    setState(prev => ({
-      ...prev,
-      counts: { ...prev.counts, [postId]: newCounts },
-      userReactions: { ...prev.userReactions, [postId]: nextReaction }
-    }));
 
     try {
-      await api.react(postId, nextReaction);
+      await api.react(postId, action);
     } catch (error) {
-      // Rollback
-      setState(prev => ({
-        ...prev,
-        counts: { ...prev.counts, [postId]: currentPostCounts },
-        userReactions: { ...prev.userReactions, [postId]: currentReaction }
-      }));
+      if (rollback) {
+        setState(prev => ({
+          ...prev,
+          counts: {
+            ...prev.counts,
+            [postId]: rollback!.counts,
+          },
+          userReactions: {
+            ...prev.userReactions,
+            [postId]: rollback!.reaction,
+          },
+        }));
+      }
       throw error;
     }
-  };
+  }, []);
 
-  const toggleRepost = async (postId: string) => {
-    const currentlyReposted = state.userReposts[postId] || false;
-    const nextReposted = !currentlyReposted;
+  const toggleRepost = useCallback(async (postId: string) => {
+    let rollback:
+      | { reposted: boolean; counts: PostCounts }
+      | null = null;
 
-    const currentPostCounts = state.counts[postId] || { likes: 0, dislikes: 0, laughs: 0, reposts: 0, comments: 0 };
-    const newCounts = { ...currentPostCounts, reposts: currentPostCounts.reposts + (nextReposted ? 1 : -1) };
+    setState(prev => {
+      const current = prev.userReposts[postId] || false;
+      const next = !current;
 
-    setState(prev => ({
-      ...prev,
-      counts: { ...prev.counts, [postId]: newCounts },
-      userReposts: { ...prev.userReposts, [postId]: nextReposted }
-    }));
+      const currentCounts = prev.counts[postId] || {
+        ...DEFAULT_COUNTS,
+      };
+
+      rollback = {
+        reposted: current,
+        counts: currentCounts,
+      };
+
+      return {
+        ...prev,
+        counts: {
+          ...prev.counts,
+          [postId]: {
+            ...currentCounts,
+            reposts: Math.max(
+              0,
+              currentCounts.reposts + (next ? 1 : -1)
+            ),
+          },
+        },
+        userReposts: {
+          ...prev.userReposts,
+          [postId]: next,
+        },
+      };
+    });
 
     try {
       await api.repost(postId);
     } catch (error) {
-      setState(prev => ({
-        ...prev,
-        counts: { ...prev.counts, [postId]: currentPostCounts },
-        userReposts: { ...prev.userReposts, [postId]: currentlyReposted }
-      }));
+      if (rollback) {
+        setState(prev => ({
+          ...prev,
+          counts: {
+            ...prev.counts,
+            [postId]: rollback!.counts,
+          },
+          userReposts: {
+            ...prev.userReposts,
+            [postId]: rollback!.reposted,
+          },
+        }));
+      }
       throw error;
     }
-  };
+  }, []);
 
-  const toggleBookmark = async (postId: string) => {
-    const currentlyBookmarked = state.userBookmarks[postId] || false;
-    const nextBookmarked = !currentlyBookmarked;
+  const toggleBookmark = useCallback(async (postId: string) => {
+    let previous = false;
 
-    setState(prev => ({
-      ...prev,
-      userBookmarks: { ...prev.userBookmarks, [postId]: nextBookmarked }
-    }));
+    setState(prev => {
+      previous = prev.userBookmarks[postId] || false;
+      return {
+        ...prev,
+        userBookmarks: {
+          ...prev.userBookmarks,
+          [postId]: !previous,
+        },
+      };
+    });
 
     try {
       await api.toggleBookmark(postId);
     } catch (error) {
       setState(prev => ({
         ...prev,
-        userBookmarks: { ...prev.userBookmarks, [postId]: currentlyBookmarked }
+        userBookmarks: {
+          ...prev.userBookmarks,
+          [postId]: previous,
+        },
       }));
       throw error;
     }
-  };
+  }, []);
 
   useEffect(() => {
-    const handleCountUpdate = ({ postId, updates }: { postId: string, updates: Partial<RealtimeState['counts'][string]> }) => {
+    const handleCountUpdate = ({
+      postId,
+      updates,
+    }: {
+      postId: string;
+      updates: Partial<PostCounts>;
+    }) => {
       setCounts(postId, updates);
     };
 
     const handleNewComment = ({ parentId }: { parentId: string }) => {
-      const currentComments = state.counts[parentId]?.comments || 0;
-      setCounts(parentId, { comments: currentComments + 1 });
+      setState(prev => {
+        const current = prev.counts[parentId]?.comments || 0;
+        return {
+          ...prev,
+          counts: {
+            ...prev.counts,
+            [parentId]: {
+              ...(prev.counts[parentId] || {
+                ...DEFAULT_COUNTS,
+              }),
+              comments: current + 1,
+            },
+          },
+        };
+      });
     };
 
     eventEmitter.on('count-update', handleCountUpdate);
@@ -206,17 +297,19 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       eventEmitter.off('count-update', handleCountUpdate);
       eventEmitter.off('newComment', handleNewComment);
     };
-  }, [state.counts]);
+  }, [setCounts]);
 
   return (
-    <RealtimeContext.Provider value={{
-      ...state,
-      setCounts,
-      initializePost,
-      toggleReaction,
-      toggleRepost,
-      toggleBookmark,
-    }}>
+    <RealtimeContext.Provider
+      value={{
+        ...state,
+        setCounts,
+        initializePost,
+        toggleReaction,
+        toggleRepost,
+        toggleBookmark,
+      }}
+    >
       {children}
     </RealtimeContext.Provider>
   );
@@ -225,7 +318,9 @@ export const RealtimeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 export const useRealtime = () => {
   const context = useContext(RealtimeContext);
   if (!context) {
-    throw new Error('useRealtime must be used within a RealtimeProvider');
+    throw new Error(
+      'useRealtime must be used within a RealtimeProvider'
+    );
   }
   return context;
 };

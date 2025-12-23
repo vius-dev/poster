@@ -7,7 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 export default function AccountSettings() {
     const { theme } = useTheme();
-    const { user } = useAuthStore();
+    const user = useAuthStore(state => state.user);
     const router = useRouter();
 
     const InfoRow = ({ label, value }: { label: string, value: string }) => (
@@ -25,7 +25,18 @@ export default function AccountSettings() {
                     <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>Login and Security</Text>
                     <InfoRow label="Username" value={`@${user?.user_metadata?.username || 'user'}`} />
                     <InfoRow label="Email" value={user?.email || 'email@example.com'} />
-                    <InfoRow label="Phone" value={user?.phone || 'Not set'} />
+                    <TouchableOpacity
+                        style={[styles.row, { borderBottomColor: theme.borderLight }]}
+                        onPress={() => router.push('/(settings)/phone')}
+                    >
+                        <Text style={[styles.label, { color: theme.textPrimary }]}>Phone</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <Text style={[styles.value, { color: theme.textSecondary, marginRight: 5 }]}>
+                                {user?.phone || 'Not set'}
+                            </Text>
+                            <Ionicons name="chevron-forward" size={16} color={theme.textTertiary} />
+                        </View>
+                    </TouchableOpacity>
                     <TouchableOpacity
                         style={[styles.row, { borderBottomColor: theme.borderLight }]}
                         onPress={() => router.push('/(settings)/password')}

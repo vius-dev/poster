@@ -25,6 +25,13 @@ export default function SettingsLayout() {
                     headerBackTitle: 'Back',
                 }}
             />
+            <Stack.Screen
+                name="username"
+                options={{
+                    title: 'Change Username',
+                    headerBackTitle: 'Settings',
+                }}
+            />
         </Stack>
     );
 }
