@@ -22,6 +22,6 @@ export const timeAgo = (timestamp: string): string => {
 
 
 export const formatTimestamp = (timestamp: string) => {
-  // TODO: Implement actual time formatting
-  return timestamp;
+  const date = new Date(timestamp);
+  return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
 };

@@ -28,6 +28,10 @@ export default function FeedList({ posts, onRefresh, onLoadMore, refreshing }: F
       ListEmptyComponent={<EmptyState />}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       ListFooterComponent={renderFooter}
+      removeClippedSubviews={true}
+      windowSize={5}
+      maxToRenderPerBatch={5}
+      initialNumToRender={5}
     />
   );
 }

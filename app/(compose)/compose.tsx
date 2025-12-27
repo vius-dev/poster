@@ -29,10 +29,40 @@ const MAX_CHARACTERS = 280;
 const ComposeScreen = () => {
   const { theme } = useTheme();
   const router = useRouter();
-  const { quotePostId, replyToId, authorUsername } = useLocalSearchParams<{ quotePostId: string, replyToId: string, authorUsername: string }>();
+  const { quotePostId, replyToId, authorUsername, postId, mode } = useLocalSearchParams<{
+    quotePostId: string,
+    replyToId: string,
+    authorUsername: string,
+    postId?: string,
+    mode?: string
+  }>();
+
   const [text, setText] = useState('');
   const [media, setMedia] = useState<ImagePicker.ImagePickerAsset[]>([]);
   const [quotedPost, setQuotedPost] = useState<Post | null>(null);
+  const [isEditing, setIsEditing] = useState(mode === 'edit');
+  const [originalPost, setOriginalPost] = useState<Post | null>(null);
+
+  // Load post for editing
+  useEffect(() => {
+    if (isEditing && postId) {
+      const loadPostForEdit = async () => {
+        try {
+          const post = await api.fetchPost(postId);
+          if (post) {
+            setOriginalPost(post);
+            setText(post.content);
+            // Note: Editing media is not supported in this MVP iteration
+            // We focus on text edits as per typical platform rules
+          }
+        } catch (error) {
+          Alert.alert('Error', 'Failed to load post for editing');
+          router.back();
+        }
+      };
+      loadPostForEdit();
+    }
+  }, [isEditing, postId]);
 
   useEffect(() => {
     if (quotePostId) {
@@ -51,13 +81,14 @@ const ComposeScreen = () => {
   }, [quotePostId]);
 
   const characterCount = text.length;
+  // Allow empty media if it's an edit (might just be removing text, or keeping old media reference [which we don't display here for simplicity])
   const isPostButtonDisabled = (characterCount === 0 && media.length === 0) || characterCount > MAX_CHARACTERS;
 
   const handleCancel = () => {
     if (text.length > 0 || media.length > 0) {
       Alert.alert(
-        'Discard post?',
-        'Your post will be lost.',
+        isEditing ? 'Discard changes?' : 'Discard post?',
+        'Your changes will be lost.',
         [
           { text: 'Keep editing', style: 'cancel' },
           { text: 'Discard', style: 'destructive', onPress: () => router.back() },
@@ -71,12 +102,17 @@ const ComposeScreen = () => {
 
   const handlePost = async () => {
     try {
-      if (replyToId) {
+      if (isEditing && postId) {
+        // EDIT EXISTING POST
+        await api.updatePost(postId, text);
+      } else if (replyToId) {
+        // REPLY
         await api.createComment(replyToId, {
           content: text,
           media: media.map(m => ({ type: 'image', url: m.uri }))
         });
       } else {
+        // CREATE NEW POST
         await api.createPost({
           content: text,
           quotedPostId: quotePostId || undefined,
@@ -84,9 +120,9 @@ const ComposeScreen = () => {
         });
       }
       router.back();
-    } catch (error) {
-      console.error('Failed to create post', error);
-      Alert.alert('Error', 'Failed to create post. Please try again.');
+    } catch (error: any) {
+      console.error('Failed to create/update post', error);
+      Alert.alert('Error', error.message || 'Failed to submit. Please try again.');
     }
   };
 
@@ -96,7 +132,7 @@ const ComposeScreen = () => {
       mediaTypes: ['images'],
       allowsMultipleSelection: true,
       selectionLimit: 4 - media.length,
-      quality: 0.7, // Compress images to reduce storage cost
+      quality: 0.5, // Aggressive compression to ensure <1MB
     });
 
     if (!result.canceled) {
@@ -126,7 +162,7 @@ const ComposeScreen = () => {
         </Pressable>
         <Pressable onPress={handlePost} disabled={isPostButtonDisabled}>
           <Text style={[styles.postButton, { color: isPostButtonDisabled ? theme.textTertiary : theme.link }]}>
-            {replyToId ? 'Reply' : 'Post'}
+            {isEditing ? 'Save' : (replyToId ? 'Reply' : 'Post')}
           </Text>
         </Pressable>
       </View>
@@ -167,7 +203,7 @@ const ComposeScreen = () => {
               <Ionicons name="happy-outline" size={24} color={theme.link} />
             </TouchableOpacity>
             <TouchableOpacity onPress={() => router.push('/(modals)/poll')} style={styles.iconButton}>
-                <Ionicons name="stats-chart-outline" size={24} color={theme.link} />
+              <Ionicons name="stats-chart-outline" size={24} color={theme.link} />
             </TouchableOpacity>
           </View>
           <Text style={[styles.charCount, { color: characterCount > MAX_CHARACTERS ? theme.error : theme.textTertiary }]}>

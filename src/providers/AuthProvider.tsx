@@ -24,6 +24,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         try {
           const userId = session.user.id;
 
+          // Auto-provision profile if needed (Simulate Supabase Trigger)
+          await api.ensureProfileExists(session.user);
+
           // Determine if we should map to the Dev Team user
           // For now, we'll map a specific dev email or just the '0' ID fallback
           const isDevEmail = session.user.email?.toLowerCase().includes('devteam') ||

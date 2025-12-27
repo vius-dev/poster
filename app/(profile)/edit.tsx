@@ -6,7 +6,6 @@ import {
   StyleSheet,
   TextInput,
   Pressable,
-  SafeAreaView,
   TouchableOpacity,
   Image,
   Alert,
@@ -15,6 +14,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/theme/theme';
 import { Ionicons } from '@expo/vector-icons';
@@ -150,7 +150,7 @@ const EditProfileScreen = () => {
       mediaTypes: ['images'],
       allowsEditing: true,
       aspect: type === 'avatar' ? [1, 1] : [3, 1],
-      quality: 1,
+      quality: 0.5, // Ensure <1MB
     });
 
     if (!result.canceled) {

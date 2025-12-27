@@ -225,6 +225,40 @@ export default function PostMenu({ visible, onClose, post }: PostMenuProps) {
             {isAuthor && (
               <>
                 <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+                {/* Edit Post Option (only within 15 mins) */}
+                {(() => {
+                  const EDIT_WINDOW = 15 * 60 * 1000;
+                  const canEdit = (Date.now() - new Date(post.createdAt).getTime()) < EDIT_WINDOW;
+
+                  if (canEdit) {
+                    return (
+                      <TouchableOpacity
+                        style={styles.option}
+                        onPress={() => {
+                          onClose();
+                          // Navigate to compose in edit mode
+                          // We need to cast the route params to 'any' to avoid deep type warnings 
+                          // as 'mode' might not be in the stricter types yet
+                          const router = require('expo-router').router;
+                          router.push({
+                            pathname: '/(compose)/compose',
+                            params: {
+                              postId: post.id,
+                              mode: 'edit',
+                              authorUsername: post.author.username // Pass for context if needed
+                            }
+                          });
+                        }}
+                      >
+                        <Ionicons name="create-outline" size={22} color={theme.textPrimary} />
+                        <Text style={[styles.optionText, { color: theme.textPrimary }]}>Edit Post</Text>
+                      </TouchableOpacity>
+                    );
+                  }
+                  return null;
+                })()}
+
                 <TouchableOpacity style={styles.option} onPress={handleDelete}>
                   <Ionicons name="trash-outline" size={22} color={theme.error} />
                   <Text style={[styles.optionText, { color: theme.error }]}>Delete Post</Text>

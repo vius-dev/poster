@@ -34,6 +34,7 @@ export type Post = {
   author: Author;
   content: string;
   createdAt: string;
+  updatedAt?: string;
   likeCount: number;
   dislikeCount: number;
   laughCount: number;

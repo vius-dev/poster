@@ -1,53 +1,41 @@
-> Edited for use in IDX on 07/09/12
+# Postr - MVP
 
-# Welcome to your Expo app 👋
+A social media application built with React Native, Expo, and a mock high-fidelity backend.
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+## 📱 Features
 
-## Get started
+-   **Feed**: Chronological timeline with posts, reposts, and threaded replies.
+-   **Composition**: Rich text editor with media support (images) and polls.
+-   **Media**: Full-screen image viewer with pinch-to-zoom and swipe gestures.
+-   **Profiles**: User profiles with bio, location, and post history.
+-   **Realtime**: Simulated notifications and live engagement counters.
+-   **Theme**: System/Light/Dark mode support.
 
-#### Android
+## 🚀 How to Run (for Testers)
 
-Android previews are defined as a `workspace.onStart` hook and started as a vscode task when the workspace is opened/started.
+1.  **Install Dependencies**
+    ```bash
+    npm install
+    ```
 
-Note, if you can't find the task, either:
-- Rebuild the environment (using command palette: `IDX: Rebuild Environment`), or
-- Run `npm run android -- --tunnel` command manually run android and see the output in your terminal. The device should pick up this new command and switch to start displaying the output from it.
+2.  **Start the Server**
+    ```bash
+    npx expo start
+    ```
 
-In the output of this command/task, you'll find options to open the app in a
+3.  **Run on Device/Simulator**
+    -   **Android**: Press `a` in the terminal.
+    -   **iOS**: Press `i` in the terminal.
+    -   **Web**: Press `w` in the terminal.
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+## 🧪 Testing Instructions
 
-You'll also find options to open the app's developer menu, reload the app, and more.
+### Core Flows
+1.  **Create Post**: Tap the `+` FAB. Try adding text and images.
+2.  **View Images**: Tap an image in the feed to open the full-screen viewer.
+3.  **Interact**: Like, Repost, and Comment on posts.
+4.  **Profile**: Tap a user avatar to visit their profile.
 
-#### Web
-
-Web previews will be started and managred automatically. Use the toolbar to manually refresh.
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
-```
-
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
-
-## Learn more
-
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+### Notes
+-   The app runs in **Mock Mode** by default. No real backend server is required.
+-   "Shop" tab has been disabled for this MVP release.

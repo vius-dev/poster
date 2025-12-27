@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, Pressable } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Pressable } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import ReactionBar from '@/components/ReactionBar';
@@ -16,6 +17,7 @@ import { useRealtime } from '@/realtime/RealtimeContext';
 import Card from '@/components/Card'; // Import the new Card component
 import { timeAgo } from '@/utils/time'; // Import a time formatting utility
 import MediaGrid from '@/components/MediaGrid';
+import ImageViewer from '@/components/ImageViewer';
 
 interface PostCardProps {
   post: Post;
@@ -36,6 +38,8 @@ export default function PostCard({ post, isFocal = false }: PostCardProps) {
 
   const [isRepostModalVisible, setRepostModalVisible] = useState(false);
   const [isMenuVisible, setMenuVisible] = useState(false);
+  const [isImageViewerVisible, setImageViewerVisible] = useState(false);
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
 
   // Initialize post state in context
   useEffect(() => {
@@ -98,7 +102,7 @@ export default function PostCard({ post, isFocal = false }: PostCardProps) {
     <Card>
       <View style={styles.container}>
         <TouchableOpacity onPress={goToProfile} activeOpacity={0.7}>
-          <Image source={{ uri: post.author.avatar }} style={styles.avatar} />
+          <Image source={{ uri: post.author.avatar }} style={styles.avatar} contentFit="cover" transition={200} />
         </TouchableOpacity>
 
         <View style={styles.mainContent}>
@@ -114,7 +118,10 @@ export default function PostCard({ post, isFocal = false }: PostCardProps) {
               <TouchableOpacity onPress={goToProfile} activeOpacity={0.7} style={styles.authorInfo}>
                 <Text style={[styles.authorName, { color: theme.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">{post.author.name}</Text>
                 <Text style={[styles.authorUsername, { color: theme.textTertiary }]} numberOfLines={1}>@{post.author.username}</Text>
-                <Text style={[styles.timestamp, { color: theme.textTertiary }]} numberOfLines={1}>· {timeAgo(post.createdAt)}</Text>
+                <Text style={[styles.timestamp, { color: theme.textTertiary }]} numberOfLines={1}>
+                  · {timeAgo(post.createdAt)}
+                  {post.updatedAt && post.updatedAt !== post.createdAt && ' · Edited'}
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => setMenuVisible(true)} style={styles.moreButton}>
                 <Ionicons name="ellipsis-horizontal" size={18} color={theme.textTertiary} />
@@ -136,7 +143,13 @@ export default function PostCard({ post, isFocal = false }: PostCardProps) {
                 </ParsedText>
               ) : null}
               {post.media && post.media.length > 0 && (
-                <MediaGrid media={post.media} onPress={goToPost} />
+                <MediaGrid
+                  media={post.media}
+                  onPress={(index) => {
+                    setSelectedImageIndex(index);
+                    setImageViewerVisible(true);
+                  }}
+                />
               )}
               {post.poll && <PollView poll={post.poll} postId={post.id} />}
               {post.quotedPost && <QuotedPost post={post.quotedPost} />}
@@ -194,6 +207,15 @@ export default function PostCard({ post, isFocal = false }: PostCardProps) {
         onClose={() => setMenuVisible(false)}
         post={post}
       />
+
+      {post.media && (
+        <ImageViewer
+          visible={isImageViewerVisible}
+          images={post.media}
+          initialIndex={selectedImageIndex}
+          onClose={() => setImageViewerVisible(false)}
+        />
+      )}
     </Card>
   );
 }

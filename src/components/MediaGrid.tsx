@@ -1,6 +1,7 @@
 
 import React from 'react';
-import { View, Image, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { Media } from '@/types/post';
 import { useTheme } from '@/theme/theme';
@@ -25,7 +26,7 @@ const MediaGrid = ({ media, onRemove, onPress }: MediaGridProps) => {
                 style={styles.imageTouchable}
                 disabled={!onPress}
             >
-                <Image source={{ uri: item.url }} style={styles.mediaImage} />
+                <Image source={{ uri: item.url }} style={styles.mediaImage} contentFit="cover" transition={200} />
             </TouchableOpacity>
             {onRemove && (
                 <TouchableOpacity onPress={() => onRemove(item.url)} style={styles.removeMediaButton}>
@@ -97,7 +98,7 @@ const styles = StyleSheet.create({
     mediaImage: {
         width: '100%',
         height: '100%',
-        resizeMode: 'cover',
+        // resizeMode: 'cover', // expo-image uses contentFit
     },
     gridImage1: {
         width: '100%',

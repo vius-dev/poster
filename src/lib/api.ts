@@ -1655,6 +1655,69 @@ mockNotificationSettings.set('0', defaultNotifications);
 
 export const api = {
   // ---------------------------------------------------------------------------
+  // AUTHENTICATION & SESSION HANDLING
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Set the current active session user ID
+   * This synchronizes the Mock API with the Supabase Auth session
+   */
+  setSessionUser: (userId: string) => {
+    CURRENT_USER_ID = userId;
+    console.log(`[API] Session user set to: ${userId}`);
+  },
+
+  /**
+   * Ensure a profile exists for the given user (Simulate 'on_auth_user_created' trigger)
+   * If the user doesn't exist in our mock DB, create a fresh profile for them.
+   */
+  ensureProfileExists: async (sessionUser: any): Promise<void> => {
+    if (!sessionUser || !sessionUser.id) return;
+
+    if (userMap.has(sessionUser.id)) {
+      // Profile already exists
+      return;
+    }
+
+    console.log(`[API] New user detected: ${sessionUser.id}. Auto-provisioning profile...`);
+
+    // Create new profile based on session data
+    // Fallback to email username if metadata is missing
+    const emailUsername = sessionUser.email ? sessionUser.email.split('@')[0] : `user${Math.floor(Math.random() * 1000)}`;
+    const metadata = sessionUser.user_metadata || {};
+    const username = metadata.username || emailUsername;
+    const name = metadata.name || username;
+
+    const newProfile: User = {
+      id: sessionUser.id,
+      name: name,
+      username: username.toLowerCase().replace(/[^a-z0-9_]/g, ''), // Sanitize
+      avatar: `https://i.pravatar.cc/150?u=${sessionUser.id}`, // Deterministic avatar
+      headerImage: `https://picsum.photos/seed/${sessionUser.id}/600/200`,
+      bio: 'Just joined Postr! 👋',
+      location: 'New User',
+      website: '',
+      is_active: true,
+      is_limited: false,
+      is_shadow_banned: false,
+      is_suspended: false,
+      is_muted: false
+    };
+
+    // Add to mock database
+    allUsers.push(newProfile);
+    userMap.set(newProfile.id, newProfile);
+
+    // Initialize empty user structures
+    followingMap.set(newProfile.id, new Set());
+    followersMap.set(newProfile.id, new Set());
+    bookmarksMap.set(newProfile.id, new Set());
+    mutedMap.set(newProfile.id, new Set());
+    blockedMap.set(newProfile.id, new Set());
+
+    console.log(`[API] Auto-provisioned profile for ${newProfile.username} (${newProfile.id})`);
+  },
+  // ---------------------------------------------------------------------------
   // SETTINGS & ACCOUNT MANAGEMENT
   // ---------------------------------------------------------------------------
 
@@ -2413,6 +2476,39 @@ export const api = {
       console.log(`[Repost] User ${CURRENT_USER_ID} reposted ${canonicalId}`);
     }
 
+    feedEngine.invalidateCache(CURRENT_USER_ID);
+  },
+
+  /**
+   * Update an existing post
+   * Enforces 15-minute edit window and ownership check
+   */
+  updatePost: async (postId: string, content: string): Promise<void> => {
+    // Simulate network delay
+    await new Promise(resolve => setTimeout(resolve, 600));
+
+    const post = allPosts.find(p => p.id === postId);
+    if (!post) throw new Error('Post not found');
+
+    if (post.author.id !== CURRENT_USER_ID) {
+      throw new Error('Unauthorized: You can only edit your own posts');
+    }
+
+    const createdAt = new Date(post.createdAt).getTime();
+    const now = Date.now();
+    const editWindow = 15 * 60 * 1000; // 15 minutes
+
+    if (now - createdAt > editWindow) {
+      throw new Error('Edit window expired. Posts can only be edited within 15 minutes.');
+    }
+
+    // Apply update
+    post.content = content;
+
+    // In a real DB, we'd update an 'updatedAt' column
+    // Here we just modify the in-memory object reference which propagates to FeedEngine
+
+    console.log(`[API] Post ${postId} updated by ${CURRENT_USER_ID}`);
     feedEngine.invalidateCache(CURRENT_USER_ID);
   },
 
@@ -3860,33 +3956,7 @@ export const api = {
 
   admin: adminApi,
 
-  /**
-   * Set the current authenticated user session
-   * @param userId - ID of the user from auth provider
-   */
-  setSessionUser: (userId: string) => {
-    CURRENT_USER_ID = userId;
-    console.log(`[API] Session user updated to: ${userId}`);
 
-    // If user doesn't exist in mock data, create a placeholder
-    if (!userMap.has(userId)) {
-      const newUser: User = {
-        id: userId,
-        name: 'Postr User',
-        username: `user_${userId.substring(0, 6).toLowerCase()}`,
-        avatar: `https://i.pravatar.cc/150?u=${userId}`,
-        bio: 'Just joined Postr! 🚀',
-        is_active: true,
-        is_limited: false,
-        is_shadow_banned: false,
-        is_suspended: false,
-        is_muted: false
-      };
-      allUsers.push(newUser);
-      userMap.set(userId, newUser);
-      console.log(`[API] Created placeholder profile for new session user: ${userId}`);
-    }
-  },
 };
 
 // =============================================================================
