@@ -1,6 +1,8 @@
 
 import { create } from 'zustand';
 import { supabase } from '@/lib/supabase';
+import { wipeUserData } from '@/lib/db/sqlite';
+import { realtimeCoordinator } from '@/realtime/RealtimeCoordinator';
 
 type AuthState = {
   session: any | null;
@@ -13,7 +15,7 @@ type AuthState = {
   initialize: () => Promise<void>;
 };
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   session: null,
   user: null,
   isAuthenticated: false,
@@ -28,6 +30,25 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
   setLoading: (loading) => set({ isLoading: loading }),
   logout: async () => {
+    try {
+      // 1. Stop active systems
+      realtimeCoordinator.shutdown();
+      // SyncEngine.cancel(); // TODO: Implement cancel in SyncEngine refactor
+
+      // 2. Wipe local data
+      const { user } = get();
+      if (user?.id) {
+        try {
+          await wipeUserData(user.id);
+        } catch (e) {
+          console.error('[Auth] Failed to wipe user data during logout', e);
+        }
+      }
+    } catch (e) {
+      console.error('[Auth] Teardown failed', e);
+    }
+
+    // 3. Sign out remotely
     await supabase.auth.signOut();
     set({ session: null, user: null, isAuthenticated: false });
   },

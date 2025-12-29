@@ -22,9 +22,10 @@ export type Comment = {
   author: Author;
   content: string;
   createdAt: string;
-  comments?: Comment[]; // Unified field name
+  comments?: Comment[];
   media?: Media[];
   parentPostId?: string;
+  repostedPostId?: string;
   isReposted?: boolean;
   isBookmarked?: boolean;
 };
@@ -33,6 +34,7 @@ export type Post = {
   id: string;
   author: Author;
   content: string;
+  type: 'original' | 'repost' | 'quote' | 'reply';
   createdAt: string;
   updatedAt?: string;
   likeCount: number;
@@ -44,10 +46,14 @@ export type Post = {
   repostedBy?: Author;
   isReposted?: boolean;
   quotedPost?: Post;
+  repostedPost?: Post;
   poll?: Poll;
   comments?: Comment[];
   media?: Media[];
   parentPostId?: string;
+  quotedPostId?: string;
+  repostedPostId?: string;
+  visibility?: 'public' | 'followers' | 'private';
   isBookmarked?: boolean;
 };
 

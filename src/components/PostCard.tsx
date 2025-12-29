@@ -67,6 +67,33 @@ export default function PostCard({ post, isFocal = false }: PostCardProps) {
   const reaction = userReactions[post.id] || post.userReaction;
   const isReposted = userReposts[post.id] ?? post.isReposted;
 
+  // For reposts, the "displayPost" which contains the content, media, etc. is the original
+  const displayPost = (post.type === 'repost' && post.repostedPost) ? post.repostedPost : post;
+
+  // Debug: Check if repost has the data
+  if (post.type === 'repost') {
+    console.log(`[PostCard] Repost ${post.id}:`, {
+      hasRepostedPost: !!post.repostedPost,
+      repostedPostId: post.repostedPostId,
+      displayPostId: displayPost.id,
+      displayPostContent: displayPost.content?.substring(0, 50)
+    });
+  }
+
+  // CRITICAL FIX: Recursively resolve repost chains
+  // If we're displaying a repost, and that repost is itself a repost, follow the chain
+  let finalDisplayPost = displayPost;
+  let depth = 0;
+  const MAX_DEPTH = 5; // Prevent infinite loops
+
+  while (finalDisplayPost.type === 'repost' && finalDisplayPost.repostedPost && depth < MAX_DEPTH) {
+    finalDisplayPost = finalDisplayPost.repostedPost;
+    depth++;
+  }
+
+  // Use the final resolved post for display
+  const resolvedDisplayPost = finalDisplayPost;
+
   const currentCounts = counts[post.id] || {
     likes: post.likeCount,
     dislikes: post.dislikeCount,
@@ -124,18 +151,19 @@ export default function PostCard({ post, isFocal = false }: PostCardProps) {
 
           <Card.Header>
             <View style={styles.authorContainer}>
-              <TouchableOpacity onPress={goToProfile} activeOpacity={0.7} style={styles.authorInfo}>
-                <Text style={[styles.authorName, { color: theme.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">{post.author.name}</Text>
-                {showAuthority && (
-                  <Image source={{ uri: post.author.official_logo }} style={styles.officialLogo} contentFit="contain" />
+              <TouchableOpacity onPress={() => router.push(`/(profile)/${resolvedDisplayPost.author.username}`)} activeOpacity={0.7} style={styles.authorInfo}>
+                <Text style={[styles.authorName, { color: theme.textPrimary }]} numberOfLines={1} ellipsizeMode="tail">{resolvedDisplayPost.author.name}</Text>
+                {isAuthorityActive(resolvedDisplayPost.author) && (
+                  <Image source={{ uri: resolvedDisplayPost.author.official_logo }} style={styles.officialLogo} contentFit="contain" />
                 )}
-                {post.author.is_verified && !showAuthority && (
+                {resolvedDisplayPost.author.is_verified && !isAuthorityActive(resolvedDisplayPost.author) && (
                   <Ionicons name="checkmark-circle" size={14} color={theme.primary} style={styles.verifiedBadge} />
                 )}
-                <Text style={[styles.authorUsername, { color: theme.textTertiary }]} numberOfLines={1}>@{post.author.username}</Text>
+                <Text style={[styles.authorUsername, { color: theme.textTertiary }]} numberOfLines={1}>@{resolvedDisplayPost.author.username}</Text>
                 <Text style={[styles.timestamp, { color: theme.textTertiary }]} numberOfLines={1}>
-                  · {timeAgo(post.createdAt)}
-                  {post.updatedAt && post.updatedAt !== post.createdAt && ' · Edited'}
+                  · {timeAgo(post.type === 'repost' || post.type === 'quote' ? post.createdAt : resolvedDisplayPost.createdAt)}
+                  {resolvedDisplayPost.updatedAt && resolvedDisplayPost.updatedAt !== resolvedDisplayPost.createdAt && post.type !== 'repost' && post.type !== 'quote' && ' · Edited'}
+                  {post.type === 'repost' && ' · Reposted'}
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => setMenuVisible(true)} style={styles.moreButton}>
@@ -145,8 +173,8 @@ export default function PostCard({ post, isFocal = false }: PostCardProps) {
           </Card.Header>
 
           <Card.Content>
-            <TouchableOpacity onPress={goToPost} disabled={isFocal} activeOpacity={0.9}>
-              {post.content ? (
+            <TouchableOpacity onPress={() => !isFocal && router.push(`/post/${resolvedDisplayPost.id}`)} disabled={isFocal} activeOpacity={0.9}>
+              {resolvedDisplayPost.content ? (
                 <ParsedText
                   style={[styles.content, { color: theme.textPrimary }]}
                   parse={[
@@ -154,20 +182,20 @@ export default function PostCard({ post, isFocal = false }: PostCardProps) {
                     { pattern: /#(\w+)/, style: [styles.hashtag, { color: theme.link }], onPress: handleHashtagPress },
                   ]}
                 >
-                  {post.content}
+                  {resolvedDisplayPost.content}
                 </ParsedText>
               ) : null}
-              {post.media && post.media.length > 0 && (
+              {resolvedDisplayPost.media && resolvedDisplayPost.media.length > 0 && (
                 <MediaGrid
-                  media={post.media}
+                  media={resolvedDisplayPost.media}
                   onPress={(index) => {
                     setSelectedImageIndex(index);
                     setImageViewerVisible(true);
                   }}
                 />
               )}
-              {post.poll && <PollView poll={post.poll} postId={post.id} />}
-              {post.quotedPost && <QuotedPost post={post.quotedPost} />}
+              {resolvedDisplayPost.poll && <PollView poll={resolvedDisplayPost.poll} postId={resolvedDisplayPost.id} />}
+              {resolvedDisplayPost.quotedPost && <QuotedPost post={resolvedDisplayPost.quotedPost} />}
             </TouchableOpacity>
           </Card.Content>
 
@@ -223,10 +251,10 @@ export default function PostCard({ post, isFocal = false }: PostCardProps) {
         post={post}
       />
 
-      {post.media && (
+      {resolvedDisplayPost.media && (
         <ImageViewer
           visible={isImageViewerVisible}
-          images={post.media}
+          images={resolvedDisplayPost.media}
           initialIndex={selectedImageIndex}
           onClose={() => setImageViewerVisible(false)}
         />

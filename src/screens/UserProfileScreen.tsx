@@ -71,26 +71,29 @@ export default function UserProfileScreen() {
           setUser(mappedUser);
 
           // Load cached posts with Reactions
-          const rows = await db.getAllAsync(`
+          // Load cached posts with Reactions
+          const postsQuery = `
             SELECT
               p.*,
               u.username, u.display_name, u.avatar_url, u.verified as is_verified,
               r.reaction_type as my_reaction
             FROM feed_items f
             JOIN posts p ON f.post_id = p.id
-            JOIN users u ON p.author_id = u.id
+            JOIN users u ON p.owner_id = u.id
             LEFT JOIN reactions r ON p.id = r.post_id AND r.user_id = ?
             WHERE f.feed_type = ?
             ORDER BY f.rank_score DESC
-          `, [currentUser?.id || '', `profile:${localUser.id}`]) as any[];
+          `;
+          const rows = await db.getAllAsync(postsQuery, [currentUser?.id || '', `profile:${localUser.id}`]) as any[];
 
           const mappedPosts: Post[] = rows.map((row: any) => ({
             id: row.id,
             content: row.content,
+            type: row.type || 'original',
             createdAt: new Date(row.created_at).toISOString(),
             updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : undefined,
             author: {
-              id: row.author_id,
+              id: row.owner_id,
               username: row.username,
               name: row.display_name,
               avatar: row.avatar_url,
@@ -124,7 +127,7 @@ export default function UserProfileScreen() {
         }
 
       } catch (e) {
-        console.error('Failed to load profile locally', e);
+        console.error('[UserProfile] Failed to load profile locally:', e);
       } finally {
         if (!user && loading && !silent) setLoading(false);
       }

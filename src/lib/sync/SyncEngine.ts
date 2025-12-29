@@ -1,18 +1,72 @@
 import * as Network from 'expo-network';
 import { getDb } from '../db/sqlite';
 import { api } from '../api';
-import { Post } from '@/types/post';
-import { AppState } from 'react-native';
 import { eventEmitter } from '@/lib/EventEmitter';
+import { generateId } from '@/utils/id';
+import { PhaseRunner } from './PhaseRunner';
+import { OutboxPostsPhase, ReactionsPhase, BookmarksPhase, FeedDeltaPhase, DiagnosticPhase, PollVotesPhase } from './syncPhases';
+import { upsertPost, ensureLocalUser } from './syncUtils';
 
-const SYNC_INTERVAL = 60000; // 1 minute
-let isSyncing = false;
+const runner = new PhaseRunner();
 
 export const SyncEngine = {
+    init: async () => {
+        // Just trigger an initial sync if online
+        await SyncEngine.startSync();
+    },
+
+    cancel: () => {
+        runner.abort();
+    },
+
+    startSync: async () => {
+        // 1. Connectivity Check
+        const state = await Network.getNetworkStateAsync();
+        if (!state.isInternetReachable) return;
+
+        // 2. Auth Check
+        const user = await api.getCurrentUser();
+        if (!user) return; // Should be impossible if called after auth gate, but safe
+
+        // 3. DB Check
+        try {
+            const db = await getDb();
+
+            // 4. Run Phases
+            await runner.run(
+                [
+                    OutboxPostsPhase,
+                    ReactionsPhase,
+                    BookmarksPhase,
+                    PollVotesPhase,
+                    FeedDeltaPhase,
+                    DiagnosticPhase
+                ],
+                {
+                    db,
+                    userId: user.id,
+                    now: Date.now()
+                }
+            );
+            console.log('[SyncEngine] Sync Cycle Complete');
+        } catch (e) {
+            console.error('[SyncEngine] Sync Cycle Failed/Aborted', e);
+        }
+    },
+
+    // UI ACTIONS - PURE LOCAL WRITES (Phase 1)
+
     toggleReaction: async (postId: string, type: 'LIKE' | 'REPOST') => {
+        if (type === 'REPOST') {
+            return SyncEngine.toggleRepost(postId);
+        }
+
         const db = await getDb();
         const user = await api.getCurrentUser();
         if (!user) throw new Error('Auth required');
+
+        // Ensure user exists locally for FK integrity
+        await ensureLocalUser(db, user);
 
         const now = Date.now();
 
@@ -31,10 +85,10 @@ export const SyncEngine = {
                 );
 
                 // Decrement Count
-                const countCol = type === 'LIKE' ? 'like_count' : 'repost_count';
+                const countCol = 'like_count';
                 await db.runAsync(
-                    `UPDATE posts SET ${countCol} = MAX(0, ${countCol} - 1), updated_at = ? WHERE id = ?`,
-                    [now, postId]
+                    `UPDATE posts SET ${countCol} = MAX(0, ${countCol} - 1) WHERE id = ?`,
+                    [postId]
                 );
             } else {
                 // Add (Optimistic)
@@ -45,16 +99,109 @@ export const SyncEngine = {
                 );
 
                 // Increment Count
-                const countCol = type === 'LIKE' ? 'like_count' : 'repost_count';
+                const countCol = 'like_count';
                 await db.runAsync(
-                    `UPDATE posts SET ${countCol} = ${countCol} + 1, updated_at = ? WHERE id = ?`,
-                    [now, postId]
+                    `UPDATE posts SET ${countCol} = ${countCol} + 1 WHERE id = ?`,
+                    [postId]
                 );
             }
         });
 
         eventEmitter.emit('feedUpdated');
+        // NOTE: No startSync() here. Sync is scheduled or triggered by background events.
+    },
+
+    votePoll: async (postId: string, choiceIndex: number) => {
+        const db = await getDb();
+        const user = await api.getCurrentUser();
+        if (!user) throw new Error('Auth required');
+
+        await ensureLocalUser(db, user);
+
+        const now = Date.now();
+
+        await db.withTransactionAsync(async () => {
+            // 1. Store vote in local table for sync
+            await db.runAsync(`
+                INSERT OR REPLACE INTO poll_votes (post_id, user_id, choice_index, sync_status, created_at)
+                VALUES (?, ?, ?, 'pending', ?)
+            `, [postId, user.id, choiceIndex, now]);
+
+            // 2. Optimistically update the post's poll JSON in the DB so feed reloads see it
+            const post: any = await db.getFirstAsync('SELECT poll_json FROM posts WHERE id = ?', [postId]);
+            if (post && post.poll_json && post.poll_json !== 'null') {
+                try {
+                    const poll = JSON.parse(post.poll_json);
+                    if (poll.choices && poll.choices[choiceIndex]) {
+                        // Mark user vote
+                        poll.userVoteIndex = choiceIndex;
+                        // Increment counts
+                        poll.choices[choiceIndex].vote_count = (Number(poll.choices[choiceIndex].vote_count) || 0) + 1;
+                        poll.totalVotes = (Number(poll.totalVotes) || 0) + 1;
+
+                        await db.runAsync(
+                            'UPDATE posts SET poll_json = ?, updated_at = ? WHERE id = ?',
+                            [JSON.stringify(poll), now, postId]
+                        );
+                    }
+                } catch (e) {
+                    console.error('[SyncEngine] Failed to update local poll_json', e);
+                }
+            }
+        });
+
+        eventEmitter.emit('feedUpdated');
+        // Trigger sync to push vote immediately
         SyncEngine.startSync();
+    },
+
+    toggleRepost: async (postId: string) => {
+        const db = await getDb();
+        const user = await api.getCurrentUser();
+        if (!user) throw new Error('Auth required');
+
+        // Ensure user exists locally for FK integrity
+        await ensureLocalUser(db, user);
+
+        const now = Date.now();
+        const localId = generateId();
+
+        try {
+            await db.withTransactionAsync(async () => {
+                // Check if exists
+                const existing: any = await db.getFirstAsync(
+                    'SELECT id FROM posts WHERE owner_id = ? AND reposted_post_id = ? AND type = "repost" AND deleted = 0',
+                    [user.id, postId]
+                );
+
+                if (existing) {
+                    // Unrepost (soft delete)
+                    await db.runAsync('UPDATE posts SET deleted = 1, updated_at = ? WHERE id = ?', [now, existing.id]);
+                    await db.runAsync('UPDATE posts SET repost_count = MAX(0, repost_count - 1) WHERE id = ?', [postId]);
+                    // Clear outbox if it hasn't synced yet
+                    await db.runAsync('DELETE FROM outbox_posts WHERE (local_id = ? OR (reposted_post_id = ? AND type = "repost")) AND owner_id = ?', [existing.id, postId, user.id]);
+                } else {
+                    // Repost - Intent
+                    await db.runAsync(`
+                        INSERT INTO outbox_posts (local_id, owner_id, content, type, reposted_post_id, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    `, [localId, user.id, '', 'repost', postId, now]);
+
+                    // Repost - Local Stub
+                    await db.runAsync(`
+                        INSERT INTO posts (id, owner_id, content, type, reposted_post_id, is_local, sync_status, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, 1, 'pending', ?, ?)
+                    `, [localId, user.id, '', 'repost', postId, now, now]);
+
+                    await db.runAsync('UPDATE posts SET repost_count = repost_count + 1 WHERE id = ?', [postId]);
+                }
+            });
+        } catch (err) {
+            console.error('[SyncEngine] toggleRepost failed', err);
+            throw err;
+        }
+
+        eventEmitter.emit('feedUpdated');
     },
 
     toggleBookmark: async (postId: string) => {
@@ -65,311 +212,164 @@ export const SyncEngine = {
         const now = Date.now();
 
         await db.withTransactionAsync(async () => {
-            // Check if exists
-            const existing: any = await db.getFirstAsync(
-                'SELECT * FROM bookmarks WHERE post_id = ?',
-                [postId]
-            );
+            // Ensure user exists locally for FK integrity
+            await ensureLocalUser(db, user);
+
+            const existing: any = await db.getFirstAsync('SELECT * FROM bookmarks WHERE post_id = ? AND user_id = ?', [postId, user.id]);
 
             if (existing) {
-                // Remove bookmark (Optimistic)
-                await db.runAsync('DELETE FROM bookmarks WHERE post_id = ?', [postId]);
+                await db.runAsync('DELETE FROM bookmarks WHERE post_id = ? AND user_id = ?', [postId, user.id]);
             } else {
-                // Add bookmark (Optimistic)
-                await db.runAsync(
-                    'INSERT INTO bookmarks (post_id, created_at) VALUES (?, ?)',
-                    [postId, now]
-                );
+                await db.runAsync('INSERT INTO bookmarks (post_id, user_id, created_at) VALUES (?, ?, ?)', [postId, user.id, now]);
             }
         });
 
         eventEmitter.emit('feedUpdated');
-        SyncEngine.startSync();
     },
 
-    enqueuePost: async (content: string, media: { type: 'image'; url: string }[], quotedPostId?: string) => {
+    async enqueuePoll(question: string, choices: any[], durationSeconds: number) {
         const db = await getDb();
         const user = await api.getCurrentUser() as any;
         if (!user) throw new Error('Not authenticated');
 
-        const localId = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const localId = generateId();
         const now = Date.now();
+        const poll = {
+            question,
+            choices,
+            expires_at: new Date(now + durationSeconds * 1000).toISOString()
+        };
 
-        await db.withTransactionAsync(async () => {
-            // 1. Insert into outbox
-            await db.runAsync(`
-        INSERT INTO outbox_posts (
-          local_id, content, media_json, post_type, parent_post_id, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?)
-      `, [localId, content, JSON.stringify(media), 'original', quotedPostId || null, now]);
+        try {
+            await db.withTransactionAsync(async () => {
+                console.log('[SyncEngine] enqueuePoll: Ensuring local user', user.id);
+                // Ensure owner exists for FK integrity
+                await ensureLocalUser(db, user);
+                console.log('[SyncEngine] enqueuePoll: User ensured');
 
-            // 2. Insert into posts (Optimistic)
-            await db.runAsync(`
-        INSERT INTO posts (
-          id, author_id, content, media_json, post_type, parent_post_id, 
-          like_count, reply_count, repost_count, 
-          is_local, sync_status, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, 1, 'pending', ?, ?)
-      `, [
-                localId, user.id, content, JSON.stringify(media), 'original', quotedPostId || null, now, now
-            ]);
+                console.log('[SyncEngine] enqueuePoll: Inserting into outbox_posts');
+                await db.runAsync(`
+                    INSERT INTO outbox_posts (local_id, owner_id, content, type, poll_json, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                `, [localId, user.id, question, 'poll', JSON.stringify(poll), now]);
+                console.log('[SyncEngine] enqueuePoll: Outbox inserted');
 
-            // 3. Insert into users if needed
-            await db.runAsync(`
-        INSERT OR IGNORE INTO users (id, username, display_name, avatar_url, header_url, verified, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `, [user.id, user.username, user.name, user.avatar, user.headerImage || null, user.is_verified ? 1 : 0, now]);
+                console.log('[SyncEngine] enqueuePoll: Inserting into posts', localId);
+                await db.runAsync(`
+                    INSERT INTO posts (id, owner_id, content, type, poll_json, like_count, reply_count, repost_count, is_local, sync_status, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, 0, 0, 0, 1, 'pending', ?, ?)
+                `, [localId, user.id, question, 'poll', JSON.stringify(poll), now, now]);
+                console.log('[SyncEngine] enqueuePoll: Post inserted');
 
-            // 4. Insert into feed_items
-            await db.runAsync(`
-        INSERT INTO feed_items (feed_type, post_id, rank_score, inserted_at)
-        VALUES ('home', ?, ?, ?)
-      `, [localId, now, now]);
-        });
+                // VERIFY (Diagnostic)
+                const checkPost: any = await db.getFirstAsync('SELECT id FROM posts WHERE id = ?', [localId]);
+                if (!checkPost) console.error('[SyncEngine] enqueuePoll CRITICAL: Post missing after insert!');
+                const checkUser: any = await db.getFirstAsync('SELECT id FROM users WHERE id = ?', [user.id]);
+                if (!checkUser) {
+                    console.error('[SyncEngine] enqueuePoll CRITICAL: User missing after insert!');
+                    throw new Error('Invariant violation: User not bound to DB');
+                }
+
+                console.log('[SyncEngine] enqueuePoll: Inserting into feed_items');
+                await db.runAsync(`INSERT OR IGNORE INTO feed_items (feed_type, user_id, post_id, rank_score, inserted_at) VALUES (?, ?, ?, ?, ?)`, ['home', user.id, localId, now, now]);
+                console.log('[SyncEngine] enqueuePoll: Feed item inserted');
+            });
+        } catch (error) {
+            console.error('[SyncEngine] enqueuePoll FK/DB Failure:', error);
+            console.error('[SyncEngine] Diagnostic Data:', { localId, ownerId: user.id, type: 'poll', parentId: null });
+            throw error;
+        }
 
         eventEmitter.emit('feedUpdated');
-        SyncEngine.startSync();
+        return localId;
     },
 
-    init: async () => {
-        // Set up network listener
-        // Set up app state listener (foreground/background)
-        // Run initial sync
-        await SyncEngine.startSync();
-    },
+    enqueuePost: async (content: string, media: { type: 'image' | 'video'; url: string }[], quotedPostId?: string, parentId?: string, repostedPostId?: string, poll?: any) => {
+        const db = await getDb();
+        const user = await api.getCurrentUser() as any;
+        if (!user) throw new Error('Not authenticated');
 
-    startSync: async () => {
-        if (isSyncing) return;
-        const { isInternetReachable } = await Network.getNetworkStateAsync();
-        if (!isInternetReachable) return;
+        const localId = generateId();
+        const now = Date.now();
+
+        if (quotedPostId || repostedPostId) {
+            const conflictQuery = repostedPostId
+                ? 'SELECT id FROM posts WHERE owner_id = ? AND reposted_post_id = ? AND type = "repost" AND deleted = 0 LIMIT 1'
+                : 'SELECT id FROM posts WHERE owner_id = ? AND quoted_post_id = ? AND deleted = 0 LIMIT 1';
+
+            const conflictParams = [user.id, (repostedPostId || quotedPostId) ?? null];
+            const existing: any = await db.getFirstAsync(conflictQuery, conflictParams);
+            if (existing) return existing.id;
+        }
+
+        const type = poll ? 'poll' : (parentId ? 'reply' : (repostedPostId ? 'repost' : (quotedPostId ? 'quote' : 'original')));
 
         try {
-            isSyncing = true;
-            console.log('Starting Sync...');
+            await db.withTransactionAsync(async () => {
+                console.log('[SyncEngine] enqueuePost: Ensuring local user', user.id);
+                // Ensure owner exists for FK integrity
+                await ensureLocalUser(db, user);
+                console.log('[SyncEngine] enqueuePost: User ensured');
 
-            await SyncEngine.processOutbox();
-            await SyncEngine.syncFeed();
-
-            console.log('Sync Complete');
-        } catch (e) {
-            console.error('Sync Failed', e);
-        } finally {
-            isSyncing = false;
-        }
-    },
-
-    processOutbox: async () => {
-        const db = await getDb();
-
-        // 1. Posts
-        const outboxItems = await db.getAllAsync('SELECT * FROM outbox_posts ORDER BY created_at ASC') as any[];
-
-        for (const item of outboxItems) {
-            try {
-                const media = item.media_json ? JSON.parse(item.media_json) : [];
-                const remotePost = await api.createPost({
-                    content: item.content,
-                    media: media,
-                    quotedPostId: item.parent_post_id
-                });
-                await db.withTransactionAsync(async () => {
-                    await db.runAsync('DELETE FROM outbox_posts WHERE local_id = ?', [item.local_id]);
-                    await db.runAsync('DELETE FROM posts WHERE id = ?', [item.local_id]);
-                    await SyncEngine.upsertPost(db, remotePost);
-                });
-            } catch (error) {
-                console.error('Failed to sync outbox item', item.local_id, error);
-            }
-        }
-
-        // 2. Reactions
-        const pendingReactions = await db.getAllAsync(
-            "SELECT * FROM reactions WHERE sync_status = 'pending'"
-        ) as any[];
-
-        for (const r of pendingReactions) {
-            try {
-                if (r.reaction_type === 'LIKE') {
-                    await api.toggleLike(r.post_id);
-                } else if (r.reaction_type === 'REPOST') {
-                    await api.repost(r.post_id);
-                }
-
-                // Mark synced
-                await db.runAsync(
-                    "UPDATE reactions SET sync_status = 'synced' WHERE id = ?",
-                    [r.id]
-                );
-            } catch (error) {
-                console.error('Failed to sync reaction', r.id, error);
-                // If 404 (post deleted), remove reaction?
-                // For now, retry later.
-            }
-        }
-
-        // 3. Bookmarks
-        // Get current bookmarks from local DB
-        const localBookmarks = await db.getAllAsync('SELECT post_id FROM bookmarks') as any[];
-        const localBookmarkIds = new Set(localBookmarks.map(b => b.post_id));
-
-        // Get remote bookmarks
-        try {
-            const remoteBookmarks = await api.getBookmarks();
-            const remoteBookmarkIds = new Set(remoteBookmarks.map(p => p.id));
-
-            // Sync additions (local has, remote doesn't)
-            for (const postId of localBookmarkIds) {
-                if (!remoteBookmarkIds.has(postId)) {
-                    try {
-                        await api.toggleBookmark(postId);
-                    } catch (error) {
-                        console.error('Failed to add bookmark', postId, error);
-                    }
-                }
-            }
-
-            // Sync removals (remote has, local doesn't)
-            for (const postId of remoteBookmarkIds) {
-                if (!localBookmarkIds.has(postId)) {
-                    try {
-                        await api.toggleBookmark(postId);
-                    } catch (error) {
-                        console.error('Failed to remove bookmark', postId, error);
-                    }
-                }
-            }
-        } catch (error) {
-            console.error('Failed to sync bookmarks', error);
-        }
-    },
-
-    syncFeed: async () => {
-        const db = await getDb();
-
-        // 1. Get last sync time
-        const result: any = await db.getFirstAsync('SELECT value FROM sync_state WHERE key = ?', ['last_feed_sync']);
-        const lastSync = result?.value || '1970-01-01T00:00:00.000Z';
-
-        // 2. Fetch Delta
-        const deltaPosts = await api.getDeltaFeed(lastSync);
-
-        if (deltaPosts.length === 0) return;
-
-        // 3. Process Config (Max timestamp found)
-        let maxCreatedAt = lastSync;
-
-        // 4. Transaction Upsert
-        await db.withTransactionAsync(async () => {
-            for (const post of deltaPosts) {
-                if (post.createdAt > maxCreatedAt) maxCreatedAt = post.createdAt;
-                if (post.updatedAt && post.updatedAt > maxCreatedAt) maxCreatedAt = post.updatedAt!;
-
-                await SyncEngine.upsertPost(db, post);
-
-                // Add to feed_items (Home Feed)
+                console.log('[SyncEngine] enqueuePost: Inserting into outbox_posts');
                 await db.runAsync(`
-          INSERT OR IGNORE INTO feed_items (feed_type, post_id, rank_score, inserted_at)
-          VALUES ('home', ?, ?, ?)
-        `, [post.id, new Date(post.createdAt).getTime(), Date.now()]);
-            }
+                    INSERT INTO outbox_posts (local_id, owner_id, content, media_json, poll_json, type, parent_id, quoted_post_id, reposted_post_id, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                `, [localId, user.id, content, JSON.stringify(media), JSON.stringify(poll || null), type, parentId || null, quotedPostId || null, repostedPostId || null, now]);
+                console.log('[SyncEngine] enqueuePost: Outbox inserted');
 
-            // Update Sync State
-            await db.runAsync(`
-        INSERT OR REPLACE INTO sync_state (key, value) VALUES ('last_feed_sync', ?)
-      `, [new Date().toISOString()]);
+                console.log('[SyncEngine] enqueuePost: Inserting into posts', localId);
+                await db.runAsync(`
+                    INSERT INTO posts (id, owner_id, content, media_json, poll_json, type, parent_id, quoted_post_id, reposted_post_id, 
+                                     like_count, reply_count, repost_count, is_local, sync_status, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 1, 'pending', ?, ?)
+                `, [localId, user.id, content, JSON.stringify(media), JSON.stringify(poll || null), type, parentId || null, quotedPostId || null, repostedPostId || null, now, now]);
+                console.log('[SyncEngine] enqueuePost: Post inserted');
 
-            // Notify UI
-            eventEmitter.emit('feedUpdated');
-        });
+                // VERIFY (Diagnostic)
+                const checkPost: any = await db.getFirstAsync('SELECT id FROM posts WHERE id = ?', [localId]);
+                if (!checkPost) console.error('[SyncEngine] enqueuePost CRITICAL: Post missing after insert!');
+                const checkUser: any = await db.getFirstAsync('SELECT id FROM users WHERE id = ?', [user.id]);
+                if (!checkUser) {
+                    console.error('[SyncEngine] enqueuePost CRITICAL: User missing after insert!');
+                    throw new Error('Invariant violation: User not bound to DB');
+                }
+
+                // Add to feed (Optimistic)
+                console.log('[SyncEngine] enqueuePost: Inserting into feed_items');
+                await db.runAsync(`INSERT OR IGNORE INTO feed_items (feed_type, user_id, post_id, rank_score, inserted_at) VALUES (?, ?, ?, ?, ?)`, ['home', user.id, localId, now, now]);
+                console.log('[SyncEngine] enqueuePost: Feed item inserted');
+            });
+        } catch (error) {
+            console.error('[SyncEngine] enqueuePost FK/DB Failure:', error);
+            console.error('[SyncEngine] Diagnostic Data:', { localId, ownerId: user.id, type, parentId, quotedPostId, repostedPostId });
+            throw error;
+        }
+
+        eventEmitter.emit('feedUpdated');
+        return localId;
     },
 
     syncProfile: async (username: string) => {
+        // On-demand fetch, separate from the main sync loop but uses shared utilities
         const db = await getDb();
         try {
+            const currentUser = await api.getCurrentUser();
+            if (!currentUser) return;
+
             const user = await api.getUser(username);
             if (!user) return;
 
             const posts = await api.getProfilePosts(user.id);
-            const now = Date.now();
-
             await db.withTransactionAsync(async () => {
-                // Upsert User
-                await db.runAsync(`
-                    INSERT OR REPLACE INTO users (id, username, display_name, avatar_url, header_url, verified, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                `, [user.id, user.username, user.name, user.avatar, user.headerImage || null, user.is_verified ? 1 : 0, now]);
-
-                // Clear old profile feed items to avoid stale data
-                // (Optional: standard caching might keep them, but let's refresh for now)
-                await db.runAsync("DELETE FROM feed_items WHERE feed_type = ?", [`profile:${user.id}`]);
-
+                await db.runAsync("DELETE FROM feed_items WHERE feed_type = ? AND user_id = ?", [`profile:${user.id}`, currentUser.id]);
                 for (const post of posts) {
-                    await SyncEngine.upsertPost(db, post);
-
-                    await db.runAsync(`
-                        INSERT OR IGNORE INTO feed_items (feed_type, post_id, rank_score, inserted_at)
-                        VALUES (?, ?, ?, ?)
-                    `, [`profile:${user.id}`, post.id, new Date(post.createdAt).getTime(), now]);
+                    await upsertPost(db, post);
+                    await db.runAsync(`INSERT OR IGNORE INTO feed_items (feed_type, user_id, post_id, rank_score, inserted_at) VALUES (?, ?, ?, ?, ?)`,
+                        [`profile:${user.id}`, currentUser.id, post.id, new Date(post.createdAt).getTime(), Date.now()]);
                 }
             });
-
             eventEmitter.emit('profileUpdated', user.id);
-        } catch (e) {
-            console.error('Failed to sync profile', e);
-        }
-    },
-
-    upsertPost: async (db: any, post: Post) => {
-        // Upsert User first
-        // Use COALESCE-like logic in app code or DB?
-        // SQLite: INSERT OR REPLACE replaces full row.
-        // Better: INSERT INTO ... ON CONFLICT(id) DO UPDATE SET ...
-        // But for simplicity, let's just make sure we extract the header correctly.
-        // Post.author usually comes from mapPost which passes row.author.
-        // If row.author is from profiles join, it has header_image.
-        // If it was mapped to User, it has headerImage.
-        const header = (post.author as any).headerImage || (post.author as any).header_image || (post.author as any).header_url || null;
-
-        await db.runAsync(`
-      INSERT INTO users (id, username, display_name, avatar_url, header_url, verified, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        username=excluded.username,
-        display_name=excluded.display_name,
-        avatar_url=excluded.avatar_url,
-        header_url=COALESCE(excluded.header_url, users.header_url),
-        verified=excluded.verified,
-        updated_at=excluded.updated_at
-    `, [
-            post.author.id,
-            post.author.username,
-            post.author.name,
-            post.author.avatar,
-            header,
-            post.author.is_verified ? 1 : 0,
-            Date.now()
-        ]);
-
-        // Upsert Post
-        await db.runAsync(`
-      INSERT OR REPLACE INTO posts (
-        id, author_id, content, media_json, post_type, parent_post_id, 
-        like_count, reply_count, repost_count, 
-        is_local, sync_status, created_at, updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'synced', ?, ?)
-    `, [
-            post.id,
-            post.author.id,
-            post.content,
-            JSON.stringify(post.media || []),
-            'original',
-            null,
-            post.likeCount || 0,
-            post.commentCount || 0,
-            post.repostCount || 0,
-            new Date(post.createdAt).getTime(),
-            new Date(post.updatedAt || post.createdAt).getTime()
-        ]);
+        } catch (e) { console.error('[SyncEngine] syncProfile failed', e); }
     }
 };

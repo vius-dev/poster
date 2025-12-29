@@ -20,7 +20,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     const fetchUser = async () => {
       if (session) {
-        setLoading(true);
+        // Only show loading if we don't already have user data
+        if (!user) {
+          setLoading(true);
+        }
+
         try {
           const userId = session.user.id;
 

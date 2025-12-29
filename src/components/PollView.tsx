@@ -11,6 +11,8 @@ interface PollViewProps {
   postId: string;
 }
 
+import { SyncEngine } from '@/lib/sync/SyncEngine';
+
 export default function PollView({ poll: initialPoll, postId }: PollViewProps) {
   const { theme } = useTheme();
   const [poll, setPoll] = useState(initialPoll);
@@ -21,6 +23,8 @@ export default function PollView({ poll: initialPoll, postId }: PollViewProps) {
     setPoll(initialPoll);
   }, [initialPoll]);
 
+  if (!poll || !poll.choices) return null;
+
   const hasVoted = poll.userVoteIndex !== undefined;
   const isExpired = new Date(poll.expiresAt) < new Date();
   const showResults = hasVoted || isExpired;
@@ -29,12 +33,29 @@ export default function PollView({ poll: initialPoll, postId }: PollViewProps) {
     if (showResults || isVoting) return;
     setIsVoting(true);
     try {
-      const updatedPost = await api.votePoll(postId, index);
-      if (updatedPost.poll) {
-        setPoll(updatedPost.poll);
-      }
+      // Optimistic Update
+      const newPoll = { ...poll };
+      if (!newPoll.choices[index].vote_count) newPoll.choices[index].vote_count = 0;
+      newPoll.choices[index].vote_count++;
+      newPoll.userVoteIndex = index;
+      newPoll.totalVotes = (Number(newPoll.totalVotes) || 0) + 1;
+
+      setPoll(newPoll);
+
+      // Use SyncEngine for offline support
+      await SyncEngine.votePoll(postId, index);
+
+      // Note: SyncEngine.votePoll is void, it triggers a bg sync.
+      // We rely on optimistic update above.
+      // If sync fails later, it will retry. 
+      // If we need to revert on persistent failure, that's complex, 
+      // but for now this is standard PWA/Offline-First behavior.
+
     } catch (error: any) {
       console.error('Failed to vote:', error);
+
+      // Revert optimistic update nicely if immediate local error (e.g. auth)
+      setPoll(initialPoll); // Revert to prop state
 
       const errorMessage = error.message || 'An unexpected error occurred';
 
@@ -43,26 +64,15 @@ export default function PollView({ poll: initialPoll, postId }: PollViewProps) {
         errorMessage,
         [{ text: 'OK' }]
       );
-
-      // [RULE 8] Fallback: Fetch existing state if we are out of sync
-      if (errorMessage.includes('already voted')) {
-        try {
-          const freshPost = await api.getPost(postId);
-          if (freshPost?.poll) {
-            setPoll(freshPost.poll);
-          }
-        } catch (fetchError) {
-          console.error('Failed to sync poll state:', fetchError);
-        }
-      }
     } finally {
       setIsVoting(false);
     }
   };
 
   const calculatePercentage = (count: number) => {
-    if (poll.totalVotes === 0) return 0;
-    return Math.round((count / poll.totalVotes) * 100);
+    const total = Number(poll.totalVotes) || 0;
+    if (total === 0) return 0;
+    return Math.round((Number(count) || 0) / total * 100);
   };
 
   return (
@@ -89,7 +99,7 @@ export default function PollView({ poll: initialPoll, postId }: PollViewProps) {
                   styles.progressBar,
                   {
                     width: `${percentage}%`,
-                    backgroundColor: choice.color ? choice.color + '33' : theme.borderLight
+                    backgroundColor: (choice.color || ['#1DA1F2', '#17BF63', '#FFAD1F', '#E0245E', '#794BC4'][index % 5]) + '33'
                   }
                 ]}
               />
@@ -121,7 +131,7 @@ export default function PollView({ poll: initialPoll, postId }: PollViewProps) {
 
       <View style={styles.footer}>
         <Text style={[styles.footerText, { color: theme.textTertiary }]}>
-          {poll.totalVotes} votes · {isExpired ? 'Final results' : '1 day left'}
+          {Number(poll.totalVotes) || 0} votes · {isExpired ? 'Final results' : 'Active'}
         </Text>
       </View>
     </View>

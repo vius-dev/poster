@@ -110,11 +110,9 @@ const ComposeScreen = () => {
         // EDIT EXISTING POST
         await api.updatePost(postId, text);
       } else if (replyToId) {
-        // REPLY
-        await api.createComment(replyToId, {
-          content: text,
-          media: media.map(m => ({ type: 'image', url: m.uri }))
-        });
+        // REPLY (OFFLINE FIRST)
+        const mediaItems = media.map(m => ({ type: 'image' as const, url: m.uri }));
+        await SyncEngine.enqueuePost(text, mediaItems, undefined, replyToId);
       } else {
         // CREATE NEW POST (OFFLINE FIRST)
         const mediaItems = media.map(m => ({ type: 'image' as const, url: m.uri }));

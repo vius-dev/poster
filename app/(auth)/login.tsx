@@ -18,13 +18,19 @@ export default function LoginScreen() {
     if (!email || !password || isLoggingIn) return;
 
     setIsLoggingIn(true);
+    console.log('[LoginScreen] Attempting login for:', email);
     try {
-      await api.login(email, password);
+      const { user, session } = await api.login(email, password);
+      console.log('[LoginScreen] Login successful. User ID:', user.id);
+
+      // Navigation will happen automatically via auth state change
+      console.log('[LoginScreen] Redirecting to tabs...');
       router.replace('/(tabs)');
     } catch (error: any) {
+      console.error('[LoginScreen] Login error:', error);
       alert(error.message || 'Failed to login');
-      console.error('Login error:', error);
     } finally {
+      console.log('[LoginScreen] Login process finished (finally block).');
       setIsLoggingIn(false);
     }
   };
@@ -41,7 +47,7 @@ export default function LoginScreen() {
 
         <View style={styles.content}>
           <Text style={[styles.title, { color: theme.textPrimary }]}>
-            See local vius right now and why they matter ...
+            See local content right now and why it matters ...
           </Text>
 
           <View style={styles.form}>

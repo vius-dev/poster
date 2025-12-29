@@ -4,6 +4,7 @@ import { User, UserProfile, Session } from "@/types/user";
 import { Notification } from "@/types/notification";
 import { Conversation, Message } from "@/types/message";
 import { ViewerRelationship } from "@/components/profile/ProfileActionRow";
+import { generateId } from '@/utils/id';
 
 // CONSTANTS
 // -------------------------------------------------------------------------
@@ -15,6 +16,29 @@ const MAX_POLL_CHOICES = 4;
 const MAX_BIO_LENGTH = 160;
 const MAX_NAME_LENGTH = 50;
 const INVITE_TOKEN_EXPIRY_HOURS = 24;
+
+const POST_SELECT = `
+  *,
+  author:profiles!owner_id(*),
+  media:post_media(*),
+  reaction_counts:reaction_aggregates!subject_id(*),
+  quoted_post:posts!quoted_post_id(
+    *,
+    author:profiles!owner_id(*),
+    media:post_media(*),
+    reaction_counts:reaction_aggregates!subject_id(*)
+  ),
+  reposted_post:posts!reposted_post_id(
+    *,
+    author:profiles!owner_id(*),
+    media:post_media(*),
+    reaction_counts:reaction_aggregates!subject_id(*)
+  )
+`;
+// Note: We handle deleted_at filtering in the mapping function or query builder because Supabase embedding filters
+// can be tricky with correct syntax. Optimally, we'd do `posts!quoted_post_id(*, deleted_at=is.null)` but 
+// robust filtering often requires views or RLS. For now, we rely on mapPost to check deleted_at if returned.
+
 
 export interface PrivacySettings {
   protectPosts: boolean;
@@ -79,11 +103,13 @@ const generateSecureToken = (): string => {
 
 // MAPPING FUNCTIONS
 // -------------------------------------------------------------------------
-const mapPost = (row: any): Post => {
+const mapPost = (row: any): Post | null => {
+  if (!row || !row.author) return null;
   return {
     id: row.id,
     author: row.author,
     content: row.content,
+    type: row.type || 'original',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     media: row.media,
@@ -94,8 +120,26 @@ const mapPost = (row: any): Post => {
     commentCount: row.reaction_counts?.comment_count || 0,
     userReaction: 'NONE',
     isBookmarked: false,
+    visibility: row.visibility || 'public',
     parentPostId: row.parent_id,
-    poll: row.poll
+    quotedPostId: row.quoted_post_id,
+    repostedPostId: row.reposted_post_id,
+    quotedPost: (row.quoted_post && !row.quoted_post.deleted_at) ? mapPost(row.quoted_post) || undefined : undefined,
+    repostedPost: (row.reposted_post && !row.reposted_post.deleted_at) ? mapPost(row.reposted_post) || undefined : undefined,
+    poll: (() => {
+      const p = row.poll || (row.poll_json ? (typeof row.poll_json === 'string' ? JSON.parse(row.poll_json) : row.poll_json) : undefined);
+      if (!p || !p.choices) return undefined;
+      return {
+        question: p.question,
+        choices: p.choices.map((c: any) => ({
+          text: c.text || c.label,
+          color: c.color,
+          vote_count: c.vote_count || 0
+        })),
+        totalVotes: p.totalVotes || p.total_votes || p.choices.reduce((s: number, c: any) => s + (c.vote_count || 0), 0),
+        expiresAt: p.expiresAt || p.expires_at || p.closes_at
+      };
+    })()
   } as Post;
 };
 
@@ -308,12 +352,7 @@ export const api = {
 
     let query = supabase
       .from('posts')
-      .select(`
-        *,
-        author:profiles!posts_owner_id_fkey(*),
-        media:post_media(*),
-        reaction_counts:reaction_aggregates!subject_id(*)
-      `)
+      .select(POST_SELECT)
       .is('deleted_at', null)
       .is('parent_id', null)
       .order('created_at', { ascending: false })
@@ -326,7 +365,9 @@ export const api = {
     const { data, error } = await query;
     if (error) throw error;
 
-    const posts = await hydratePosts(data.map(mapPost));
+    const posts = await hydratePosts(
+      data.map(mapPost).filter((p): p is Post => p !== null)
+    );
     const hasMore = posts.length === limit;
 
     return {
@@ -340,26 +381,46 @@ export const api = {
     return api.getFeed(params);
   },
 
-  getDeltaFeed: async (since: string): Promise<Post[]> => {
-    const { data, error } = await supabase
-      .from('posts')
-      .select(`
-        *,
-        author:profiles!posts_owner_id_fkey(*),
-        media:post_media(*),
-        reaction_counts:reaction_aggregates!subject_id(*)
-      `)
-      .gt('updated_at', since)
-      .is('deleted_at', null)
-      .order('updated_at', { ascending: true });
+  getDeltaFeed: async (since: string): Promise<{ upserts: Post[]; deletedIds: string[] }> => {
+    const [upsertsRes, deletionsRes] = await Promise.all([
+      supabase
+        .from('posts')
+        .select(POST_SELECT)
+        .or(`updated_at.gt.${since},created_at.gt.${since}`)
+        .is('deleted_at', null)
+        .order('updated_at', { ascending: true }),
+      supabase
+        .from('posts')
+        .select('id, deleted_at')
+        .gt('deleted_at', since)
+        .not('deleted_at', 'is', null)
+    ]);
 
-    if (error) throw error;
+    if (upsertsRes.error) throw upsertsRes.error;
+    if (deletionsRes.error) throw deletionsRes.error;
 
-    return hydratePosts(data.map(mapPost));
+    const upsertsData = upsertsRes.data || [];
+    const deletionsData = deletionsRes.data || [];
+
+    console.log(`[API] getDeltaFeed: ${upsertsData.length} upserts, ${deletionsData.length} deletions`);
+
+    const upserts = await hydratePosts(
+      upsertsData.map(mapPost).filter((p): p is Post => p !== null)
+    );
+
+    const deletedIds = deletionsData.map((r: any) => r.id);
+
+    return { upserts, deletedIds };
   },
 
-  createPost: async (postData: { content: string; media?: Media[]; quotedPostId?: string }): Promise<Post> => {
-    validateContent(postData.content);
+  createPost: async (postData: { id?: string; content?: string; type?: string; media?: Media[]; pollJson?: any; quotedPostId?: string; parentId?: string; repostedPostId?: string }): Promise<Post> => {
+    // Allow empty content for reposts or media-only posts
+    const hasMedia = postData.media && postData.media.length > 0;
+    const isRepost = postData.type === 'repost' || postData.repostedPostId;
+
+    if (!isRepost && !hasMedia) {
+      validateContent(postData.content || '');
+    }
     validateMedia(postData.media);
 
     const user = await getAuthenticatedUser();
@@ -367,11 +428,16 @@ export const api = {
     const { data: post, error: postError } = await supabase
       .from('posts')
       .insert({
+        id: postData.id || generateId(),
         content: postData.content,
+        type: postData.type || (postData.quotedPostId ? 'quote' : postData.repostedPostId ? 'repost' : (postData.parentId ? 'reply' : 'original')),
         quoted_post_id: postData.quotedPostId,
-        owner_id: user.id
+        reposted_post_id: postData.repostedPostId,
+        parent_id: postData.parentId,
+        owner_id: user.id,
+        poll_json: postData.pollJson
       })
-      .select()
+      .select(POST_SELECT)
       .single();
 
     if (postError) throw postError;
@@ -410,8 +476,10 @@ export const api = {
     const { data: post, error: postError } = await supabase
       .from('posts')
       .insert({
+        id: (commentData as any).id || generateId(),
         content: commentData.content,
         parent_id: postId,
+        type: 'reply',
         owner_id: user.id
       })
       .select()
@@ -462,19 +530,16 @@ export const api = {
   getPost: async (postId: string): Promise<Post | null> => {
     const { data, error } = await supabase
       .from('posts')
-      .select(`
-        *,
-        author:profiles!posts_owner_id_fkey(*),
-        media:post_media(*),
-        reaction_counts:reaction_aggregates!subject_id(*)
-      `)
+      .select(POST_SELECT)
       .eq('id', postId)
       .is('deleted_at', null)
       .single();
 
     if (error || !data) return null;
 
-    const hydrated = await hydratePosts([mapPost(data)]);
+    const mappedPost = mapPost(data);
+    if (!mappedPost) return null;
+    const hydrated = await hydratePosts([mappedPost]);
     return hydrated[0] || null;
   },
 
@@ -577,24 +642,27 @@ export const api = {
       .from('posts')
       .select('id')
       .eq('owner_id', user.id)
-      .eq('parent_id', postId)
+      .eq('reposted_post_id', postId)
       .eq('type', 'repost')
       .is('deleted_at', null)
       .maybeSingle();
 
     if (existing) {
+      // Unrepost (soft delete)
       await supabase
         .from('posts')
         .update({ deleted_at: new Date().toISOString() })
         .eq('id', existing.id);
     } else {
-      const { error } = await supabase.from('posts').insert({
-        owner_id: user.id,
-        content: '',
-        type: 'repost',
-        parent_id: postId
-      });
-      if (error) throw error;
+      // Repost (Create with stable ID)
+      await supabase
+        .from('posts')
+        .insert({
+          id: generateId(),
+          owner_id: user.id,
+          reposted_post_id: postId,
+          type: 'repost'
+        });
     }
   },
 
@@ -646,10 +714,7 @@ export const api = {
       .from('bookmarks')
       .select(`
         post:posts!inner(
-          *,
-          author:profiles!posts_owner_id_fkey(*),
-          media:post_media(*),
-          reaction_counts:reaction_aggregates!subject_id(*)
+          ${POST_SELECT.trim()}
         )
       `)
       .eq('user_id', user.id)
@@ -657,7 +722,9 @@ export const api = {
       .order('created_at', { ascending: false });
 
     if (error) throw error;
-    return hydratePosts(data.map((row: any) => mapPost(row.post)));
+    return hydratePosts(
+      data.map((row: any) => mapPost(row.post)).filter((p): p is Post => p !== null)
+    );
   },
 
   // MESSAGING
@@ -979,37 +1046,31 @@ export const api = {
   getProfilePosts: async (userId: string): Promise<Post[]> => {
     const { data, error } = await supabase
       .from('posts')
-      .select(`
-        *,
-        author:profiles!posts_owner_id_fkey(*),
-        media:post_media(*),
-        reaction_counts:reaction_aggregates!subject_id(*)
-      `)
+      .select(POST_SELECT)
       .eq('owner_id', userId)
       .is('parent_id', null)
       .is('deleted_at', null)
       .order('created_at', { ascending: false });
 
     if (error) throw error;
-    return hydratePosts(data.map(mapPost));
+    return hydratePosts(
+      data.map(mapPost).filter((p): p is Post => p !== null)
+    );
   },
 
   getProfileReplies: async (userId: string): Promise<Post[]> => {
     const { data, error } = await supabase
       .from('posts')
-      .select(`
-        *,
-        author:profiles!posts_owner_id_fkey(*),
-        media:post_media(*),
-        reaction_counts:reaction_aggregates!subject_id(*)
-      `)
+      .select(POST_SELECT)
       .eq('owner_id', userId)
       .not('parent_id', 'is', null)
       .is('deleted_at', null)
       .order('created_at', { ascending: false });
 
     if (error) throw error;
-    return hydratePosts(data.map(mapPost));
+    return hydratePosts(
+      data.map(mapPost).filter((p): p is Post => p !== null)
+    );
   },
 
   getProfileMedia: async (userId: string): Promise<Post[]> => {
@@ -1026,7 +1087,9 @@ export const api = {
       .order('created_at', { ascending: false });
 
     if (error) throw error;
-    return hydratePosts(data.map(mapPost));
+    return hydratePosts(
+      data.map(mapPost).filter((p): p is Post => p !== null)
+    );
   },
 
   getProfileLikes: async (userId: string): Promise<Post[]> => {
@@ -1046,7 +1109,9 @@ export const api = {
       .order('created_at', { ascending: false });
 
     if (error) throw error;
-    return hydratePosts(data.map((row: any) => mapPost(row.post)));
+    return hydratePosts(
+      data.map((row: any) => mapPost(row.post)).filter((p): p is Post => p !== null)
+    );
   },
 
   updateProfile: async (updates: Partial<UserProfile>): Promise<void> => {
@@ -1197,33 +1262,20 @@ export const api = {
     return updatedPost;
   },
 
-  createPoll: async (pollData: { question: string; choices: any[]; durationSeconds: number }): Promise<void> => {
+  createPoll: async (pollData: { question: string; choices: any[]; durationSeconds: number; id?: string }): Promise<Post> => {
     validateContent(pollData.question, 500);
     validatePollChoices(pollData.choices);
 
-    const user = await getAuthenticatedUser();
-
-    const { data: post, error: postError } = await supabase.from('posts').insert({
+    return api.createPost({
+      id: pollData.id,
       content: pollData.question,
-      owner_id: user.id
-    }).select().single();
-
-    if (postError) throw postError;
-
-    const { error: pollError } = await supabase.from('polls').insert({
-      post_id: post.id,
-      question: pollData.question,
-      choices: pollData.choices,
-      expires_at: new Date(Date.now() + pollData.durationSeconds * 1000).toISOString()
+      type: 'poll',
+      pollJson: {
+        question: pollData.question,
+        choices: pollData.choices,
+        expires_at: new Date(Date.now() + pollData.durationSeconds * 1000).toISOString()
+      }
     });
-
-    if (pollError) {
-      await supabase
-        .from('posts')
-        .update({ deleted_at: new Date().toISOString() })
-        .eq('id', post.id);
-      throw pollError;
-    }
   },
 
   createReport: async (entityType: string, entityId: string, reportType: string, reporterId: string, reason: string): Promise<void> => {
@@ -1405,12 +1457,7 @@ export const api = {
 
     const { data, error } = await supabase
       .from('posts')
-      .select(`
-        *,
-        author:profiles!posts_owner_id_fkey(*),
-        media:post_media(*),
-        reaction_counts:reaction_aggregates!subject_id(*)
-      `)
+      .select(POST_SELECT)
       .textSearch('fts', query, {
         type: 'websearch',
         config: 'english'
@@ -1419,7 +1466,9 @@ export const api = {
       .limit(SEARCH_LIMIT);
 
     if (error) throw error;
-    return hydratePosts(data.map(mapPost));
+    return hydratePosts(
+      data.map(mapPost).filter((p): p is Post => p !== null)
+    );
   },
 
   search: async (query: string): Promise<{ posts: Post[]; users: User[] }> => {
@@ -1446,18 +1495,15 @@ export const api = {
 
     const { data, error } = await supabase
       .from('posts')
-      .select(`
-        *,
-        author:profiles!posts_owner_id_fkey(*),
-        media:post_media(*),
-        reaction_counts:reaction_aggregates!subject_id(*)
-      `)
+      .select(POST_SELECT)
       .ilike('content', `%#${tag}%`)
       .is('deleted_at', null)
       .order('created_at', { ascending: false });
 
     if (error) throw error;
-    return hydratePosts(data.map(mapPost));
+    return hydratePosts(
+      data.map(mapPost).filter((p): p is Post => p !== null)
+    );
   },
 
   // REALTIME SUBSCRIPTIONS

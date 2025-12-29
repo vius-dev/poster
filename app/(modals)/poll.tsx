@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/theme/theme';
 import { api } from '@/lib/api';
+import { SyncEngine } from '@/lib/sync/SyncEngine';
 import { PollChoice } from '@/types/poll';
 
 const MAX_CHOICES = 4;
@@ -66,11 +67,11 @@ export default function PollScreen() {
     }
 
     try {
-      await api.createPoll({
+      await SyncEngine.enqueuePoll(
         question,
         choices,
-        durationSeconds: totalSeconds
-      });
+        totalSeconds
+      );
       router.back();
     } catch (error) {
       console.error(error);

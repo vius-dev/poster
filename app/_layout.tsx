@@ -1,4 +1,3 @@
-
 import { Stack } from 'expo-router';
 import { ThemeProvider, useTheme } from '@/theme/theme';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -10,40 +9,61 @@ import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { AuthProvider } from '@/providers/AuthProvider';
 import { ResponsiveLayout } from '@/components/layout/ResponsiveLayout';
 import { useLoadAssets } from '@/hooks/useLoadAssets';
-import { initDatabase } from '@/lib/db/sqlite';
+import { initSystem, bindUserDatabase } from '@/lib/db/sqlite';
 import { SyncEngine } from '@/lib/sync/SyncEngine';
 import { registerBackgroundFetchAsync } from '@/lib/sync/BackgroundFetch';
 
 function RootLayoutNav() {
   const { theme } = useTheme();
-  const { isAuthenticated, isLoading: isAuthLoading, initialize } = useAuthStore();
+  const { isAuthenticated, isLoading: isAuthLoading, initialize, user } = useAuthStore();
   const isLoadingAssets = useLoadAssets();
 
-  // Initialize auth session on mount
+  // Phase 0/1: System Initialization & Auth Bootstrap
+  // This happens once on app launch
   useEffect(() => {
-    initialize();
-  }, []);
-
-  useEffect(() => {
-    realtimeCoordinator.initialize();
-
-    const initOffline = async () => {
+    const boot = async () => {
       try {
-        await initDatabase();
-        await SyncEngine.init();
-        registerBackgroundFetchAsync().catch(console.error);
+        await initSystem(); // Ensure DB DDL is ready (Phase 0/1)
+        await initialize(); // Check auth state
       } catch (e) {
-        console.error('Failed to initialize offline system', e);
+        console.error('[Layout] Boot failed', e);
       }
     };
-    initOffline();
-
-    return () => {
-      realtimeCoordinator.shutdown();
-    };
+    boot();
   }, []);
 
-  // Show loading screen while determining auth state
+  // Phase 2: User Initialization & Sync/Realtime
+  // This happens only when we have a confirmed user
+  useEffect(() => {
+    if (!isAuthenticated || !user) return;
+
+    const setupUser = async () => {
+      try {
+        console.log('[Layout] Setting up user environment for:', user.id);
+        await bindUserDatabase(user.id); // Bind DB to user (Phase 2)
+
+        // Initialize user-scoped systems
+        // The order matters: DB Scope -> Sync Engine -> Realtime
+        await SyncEngine.init();
+        realtimeCoordinator.initialize();
+
+        registerBackgroundFetchAsync().catch((e) =>
+          console.warn('[Layout] Background fetch registration failed', e)
+        );
+      } catch (e) {
+        console.error('[Layout] User setup failed', e);
+      }
+    };
+    setupUser();
+
+    return () => {
+      console.log('[Layout] Tearing down user environment');
+      realtimeCoordinator.shutdown();
+      // SyncEngine cleanup should ideally happen here too
+    };
+  }, [isAuthenticated, user?.id]);
+
+  // Show loading screen while determining auth state or loading assets
   if (isAuthLoading || isLoadingAssets) {
     return (
       <SafeAreaProvider>
@@ -102,7 +122,6 @@ function RootLayoutNav() {
                     presentation: 'modal',
                   }}
                 />
-                <Stack.Screen name="(auth)" options={{ headerShown: false }} />
               </Stack>
             </ResponsiveLayout>
           )}
